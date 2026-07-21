@@ -85,7 +85,7 @@
             }
 
             try {
-                _buildRevisionLayout(contentEl, writeEl, diffResult.leftHtml, hash, diffResult.stats);
+                _buildRevisionLayout(contentEl, writeEl, diffResult.leftHtml, diffResult.rightHtml, hash, diffResult.stats);
             } catch (e) {
                 // _buildRevisionLayout 内部异常时 close() 回滚 DOM 状态
                 close();
@@ -100,7 +100,7 @@
     // DOM 重构（纯 DOM 操作，不触碰 Typora editor）
     // ===================================================================
 
-    function _buildRevisionLayout(contentEl, writeEl, oldHtml, hash, stats) {
+    function _buildRevisionLayout(contentEl, writeEl, oldHtml, newHtml, hash, stats) {
         var leftWrapper = document.createElement("div");
         leftWrapper.id = "git-rev-left";
 
@@ -176,9 +176,9 @@
 
         _bindEvents();
 
-        // ── ❹ 注入旧版 HTML（已在 DOM 重构前渲染完成）──
+        // ── ❹ 注入新版+新增标注 HTML（已在 DOM 重构前渲染完成）──
         var col = document.getElementById("git-rev-col");
-        col.innerHTML = oldHtml || '<p class="git-rev-empty-msg">(无内容)</p>';
+        col.innerHTML = newHtml || '<p class="git-rev-empty-msg">(无内容)</p>';
         var titleEl = document.getElementById("git-rev-title");
         if (titleEl) titleEl.textContent = "📜 对比 " + hash.substring(0, 7);
         var statusbar = document.getElementById("git-rev-statusbar");
