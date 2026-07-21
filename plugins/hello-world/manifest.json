@@ -1,0 +1,22 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "一个最小的 Typora 插件, 演示插件 API 的完整面",
+  "author": "Developer",
+  "main": "main.js",
+  "style": "style.css",
+  "enabled": true,
+  "hotkeys": [
+    {
+      "command": "hello-world:greet",
+      "key": "Ctrl+Shift+H",
+      "when": "always"
+    }
+  ],
+  "settings": {
+    "greeting": "Hello from Typora Plugin System! 🎉",
+    "showOnStartup": true,
+    "enableTypewriterSound": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "bidirectional-links",
+  "name": "双向链接",
+  "version": "1.0.0",
+  "description": "Obsidian 风格的双向链接: [[wiki-link]] 语法 + 反链面板",
+  "author": "BetterTypora",
+  "main": "main.js",
+  "style": "style.css",
+  "enabled": true,
+  "hotkeys": [
+    { "command": "bidirectional-links:toggle-panel", "key": "Ctrl+Shift+B", "when": "editorFocus" },
+    { "command": "bidirectional-links:graph-view", "key": "Ctrl+Shift+G", "when": "editorFocus" }
+  ],
+  "settings": {
+    "showSnippets": true,
+    "snippetContextChars": 40,
+    "groupByFolder": false,
+    "pollIntervalMs": 2000,
+    "maxFileSizeKb": 500,
+    "caseSensitiveFirst": true
+  }
+}

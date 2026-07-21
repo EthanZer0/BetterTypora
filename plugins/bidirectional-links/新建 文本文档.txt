@@ -1,0 +1,71 @@
+typora://app/userData/themes/base.user.css:1  Failed to load resource: net::ERR_UNEXPECTED
+typora://app/userData/themes/github.user.css:1  Failed to load resource: net::ERR_UNEXPECTED
+tex-svg-full.js:1 No version information available for component [tex]/xypic
+(anonymous) @ tex-svg-full.js:1
+tex-svg-full.js:1 MathJax: Invalid option "menuOptions" (no default value).
+optionError @ tex-svg-full.js:1
+frame.js:52 [UndoManager] reset commandStack
+frame.js:52 reset NodeMap
+frame.js:52 readContentFrom D:\文件夹\学习专区\图谱测试\设计模式-参考-21.md
+VM212:51 [BetterTypora] 正在初始化... 插件根目录: D:\文件夹\学习专区\笔记软件\Typora\resources\plugins
+VM212:51 [BetterTypora] Command registered: plugin-system:status
+VM212:51 [BetterTypora] Command registered: plugin-system:reload-all
+VM212:1102 🧩 BetterTypora 已就绪
+VM212:1103   BetterTypora.status()  → 查看插件状态
+VM212:1104   BetterTypora.commands.list() → 列出命令
+VM212:1105   BetterTypora.reloadPlugin('id') → 热重载插件
+frame.js:52 onBecomeActive
+frame.js:52 File.activeWindow = true
+VM212:51 [PluginManager] 加载插件: bidirectional-links (v1.0.0)
+VM212:51 [bidirectional-links] 双向链接插件加载完成
+VM212:51 [PluginManager] 启用插件: bidirectional-links
+VM212:51 [bidirectional-links] 启用双向链接插件
+VM212:51 [bidirectional-links] 已拦截 library.switch
+VM212:51 [BetterTypora] Command registered: bidirectional-links:toggle-panel
+VM212:51 [BetterTypora] Command registered: bidirectional-links:rebuild-index
+VM212:51 [BetterTypora] Command registered: bidirectional-links:open-backlink
+VM212:51 [BetterTypora] Command registered: bidirectional-links:graph-view
+VM212:51 [bidirectional-links] 双向链接插件启用完成 ✅
+VM212:51 [PluginManager] 加载插件: hello-world (v1.0.0)
+VM212:51 [hello-world] Hello World v1.0.0 已加载
+VM212:51 [hello-world] 插件目录: D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\hello-world
+VM212:51 [PluginManager] 启用插件: hello-world
+VM212:51 [BetterTypora] Command registered: hello-world:greet
+VM212:51 [BetterTypora] Command registered: hello-world:reset
+VM212:51 [BetterTypora] Command registered: hello-world:status
+VM212:51 [hello-world] Hello World 已启用 ✅
+VM212:51 [PluginManager] 加载插件: tabs (v1.0.0)
+VM212:51 [tabs] 标签页插件 v1.0.0 已加载
+VM212:51 [PluginManager] 启用插件: tabs
+VM212:51 [tabs] 正在启用标签页插件...
+VM212:51 [tabs] 标签恢复: 9 个标签
+VM212:51 [tabs] 已恢复 9 个标签
+VM212:51 [tabs] 标签栏已注入
+VM212:51 [tabs] 已拦截 openFile (monkey-patch)
+VM212:51 [tabs] 已安装新建文件拦截器
+VM212:51 [BetterTypora] Command registered: tabs:next-tab
+VM212:51 [BetterTypora] Command registered: tabs:prev-tab
+VM212:51 [BetterTypora] Command registered: tabs:close-tab
+VM212:51 [BetterTypora] Command registered: tabs:reopen-tab
+VM212:51 [BetterTypora] Command registered: tabs:create-untitled
+VM212:51 [tabs] 标签页插件已启用 ✅ (9 个标签)
+VM212:51 [PluginManager] 已加载 3 个插件: bidirectional-links, hello-world, tabs
+VM212:51 [hello-world] 插件系统就绪 — Hello World 正在运行!
+VM212:51 [BetterTypora] 初始化完成 ✅
+VM212:51 [bidirectional-links] 从缓存加载索引: 250 文件, 2071 链接
+VM212:51 [bidirectional-links] 已拦截 openFile
+frame.js:53 onFilePathUpdated D:\文件夹\学习专区\图谱测试\设计模式-参考-21.md
+VM212:51 [bidirectional-links] 已安装 dblclick 拦截
+VM225:5 [@zenuml/core] Store is a function and is not initiated in 1 second.
+(anonymous) @ VM225:5
+frame.js:52 TypeError: Failed to execute 'createRadialGradient' on 'CanvasRenderingContext2D': The provided double value is non-finite.
+    at GraphRenderer._drawNode (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:491:24)
+    at GraphRenderer.render (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:744:18)
+    at F (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:989:22)
+    at t (frame.js:26:179846)
+window.console.console.sendError @ frame.js:52
+frame.js:26 Uncaught TypeError: Failed to execute 'createRadialGradient' on 'CanvasRenderingContext2D': The provided double value is non-finite.
+    at GraphRenderer._drawNode (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:491:24)
+    at GraphRenderer.render (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:744:18)
+    at F (D:\文件夹\学习专区\笔记软件\Typora\resources\plugins\bidirectional-links\graph-renderer.js:989:22)
+    at t (frame.js:26:179846)

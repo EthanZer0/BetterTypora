@@ -1,0 +1,14 @@
+/**
+ * Hello World 插件样式
+ * =====================
+ * 本文件在插件启用时自动注入到 Typora 的 <head> 中,
+ * 在禁用时自动移除。style 标签的 id 为 "typora-plugin-css-hello-world"。
+ */
+
+/* Toast 通知基础样式 (内联样式已覆盖大部分, 这里做增强) */
+.typora-plugin-toast-hello-world {
+    pointer-events: none;
+    user-select: none;
+}
+
+/* 你可以在这里添加任何插件 UI 元素的样式 */

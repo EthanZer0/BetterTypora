@@ -1,0 +1,165 @@
+/* ===================================================================
+ * 标签页插件 — 标签栏样式
+ * 通过 Typora CSS 变量自适应亮色/暗色主题
+ * =================================================================== */
+
+#typora-tab-bar {
+    height: 32px;
+    width: 100%;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    background: var(--bg-color, #fafafa);
+    border-bottom: 1px solid var(--window-border, #ddd);
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+    font-size: 12px;
+    padding: 0 4px;
+    box-sizing: border-box;
+}
+
+/* ===================================================================
+ * 标签芯片 — 亮色默认值
+ * 所有硬编码 fallback 值（如 #fafafa、#333、rgba(0,0,0,0.08)）均为
+ * 浅色模式默认。暗色模式下 Typora 主题通过 CSS 变量覆盖这些值。
+ * =================================================================== */
+
+/* 滚动条 — 极细 */
+#typora-tab-bar::-webkit-scrollbar {
+    height: 2px;
+}
+#typora-tab-bar::-webkit-scrollbar-thumb {
+    background: var(--window-border, #ddd);
+    border-radius: 1px;
+}
+
+/* ===================================================================
+ * 标签芯片
+ * =================================================================== */
+.typora-tab-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 8px 0 12px;
+    margin: 2px 1px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-color, #555);
+    background: var(--side-bar-bg-color, var(--bg-color));  /* 从侧边栏颜色取底色, 保证可见 */
+    border: 1px solid transparent;
+    user-select: none;
+    max-width: 200px;
+    flex-shrink: 0;
+    transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* 未激活标签 — 微妙立体感，亮顶线。一体化 (unibody) 取消顶线。 */
+.typora-tab-chip:not(.active) {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+
+body.unibody-window .typora-tab-chip:not(.active) {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);  /* 去掉 inset 顶线 */
+}
+
+.typora-tab-chip:hover {
+    background: var(--item-hover-bg-color, rgba(128,128,128,0.12));
+    color: var(--heading-text-color, var(--text-color, #333));
+}
+
+/* 激活标签 — 顶线强调，一体化 (unibody) 改用底线避免标题栏遮挡 */
+.typora-tab-chip.active {
+    background: var(--bg-color, #fafafa);
+    border-color: transparent;
+    border-top: 2px solid var(--active-border-color, #4a90d9);
+    font-weight: 600;
+    color: var(--heading-text-color, var(--text-color, #333));
+    box-shadow: none;
+}
+
+body.unibody-window .typora-tab-chip.active {
+    border-top: 2px solid transparent;
+    border-bottom: 2px solid var(--active-border-color, #4a90d9);
+}
+
+/* 脏文档指示器 (蓝色圆点, 左侧) */
+.typora-tab-chip.dirty::before {
+    content: "●";
+    color: #4a90d9;
+    font-size: 9px;
+    margin-right: 6px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+/* 脏文档 — 标签名轻微斜体 */
+.typora-tab-chip.dirty .typora-tab-label {
+    font-style: italic;
+}
+
+/* 标签文本 — 溢出省略 */
+.typora-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ===================================================================
+ * 关闭按钮
+ * =================================================================== */
+.typora-tab-close {
+    margin-left: 8px;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 3px;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-color, #555);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    flex-shrink: 0;
+}
+
+.typora-tab-chip:hover .typora-tab-close {
+    opacity: 0.5;
+}
+
+.typora-tab-close:hover {
+    opacity: 1 !important;
+    background: rgba(128,128,128,0.2);
+}
+
+/* 确保关闭按钮不可选中 */
+.typora-tab-close::selection {
+    background: transparent;
+}
+
+/* ===================================================================
+ * 拖拽排序
+ * =================================================================== */
+
+/* 拖拽中 — 芯片随鼠标平移到导轨任意位置, 略上浮 + 阴影 */
+.typora-tab-chip.dragging {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.22);
+    opacity: 0.85;
+    z-index: 20;
+    /* transition 由 JS 动态控制 (none 避免动画滞后, "" 恢复) */
+}
+
+/* 避让动画 — 非拖拽芯片平滑让出位置 */
+.typora-tab-chip.yielding {
+    transition: transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* 插入位置指示 — 目标芯片左侧出现竖线 */
+.typora-tab-chip.insert-before {
+    border-left: 2px solid var(--active-border-color, #4a90d9);
+}
+
+

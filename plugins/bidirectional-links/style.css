@@ -1,0 +1,542 @@
+/**
+ * Bidirectional Links — Style
+ * ===========================
+ * Tab 按钮：完全继承 Typora 原生的 .info-panel-tab 样式 (window.css)。
+ * 面板切换：通过 #typora-sidebar.active-tab-backlinks CSS class 驱动，
+ *           不手动操作原生面板的 hide 类，避免与原生 tab 切换冲突。
+ */
+
+/* ===================================================================
+ * Tab 按钮
+ * =================================================================== */
+
+/* 默认显示 backlinks tab（覆盖 window.css 的 .info-panel-tab{display:none}） */
+#info-panel-tab-backlinks {
+    display: block;
+}
+
+/* 激活态 — 对齐原生 active tab 样式 (font-weight:700; opacity:1) */
+#info-panel-tab-backlinks.active,
+#info-panel-tab-backlinks.active:hover {
+    font-weight: 700;
+    opacity: 1;
+}
+
+#info-panel-tab-backlinks.active .info-panel-tab-border {
+    height: 4px;
+    background-color: currentColor;
+}
+
+/* 搜索模式时隐藏 backlinks tab */
+.ty-show-search #info-panel-tab-backlinks {
+    display: none;
+}
+
+/* ===================================================================
+ * 面板显隐 — 用 sidebar class 驱动，不碰原生元素
+ * =================================================================== */
+
+/* 默认：backlinks 面板隐藏 */
+#backlinks-content {
+    display: none;
+    font-size: 13px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* 仅在 active-tab-backlinks 激活时显示 */
+#typora-sidebar.active-tab-backlinks #backlinks-content {
+    display: block;
+}
+
+/* 同时隐藏原生面板（避免重叠） */
+#typora-sidebar.active-tab-backlinks #file-library,
+#typora-sidebar.active-tab-backlinks #file-library-list,
+#typora-sidebar.active-tab-backlinks #file-library-tree,
+#typora-sidebar.active-tab-backlinks #outline-content,
+#typora-sidebar.active-tab-backlinks #file-info-content,
+#typora-sidebar.active-tab-backlinks #file-library-search,
+#typora-sidebar.active-tab-backlinks #file-library-search-result,
+#typora-sidebar.active-tab-backlinks #backlinks-content ~ .sidebar-content-content {
+    display: none !important;
+}
+
+/* 当反链面板关闭时，恢复原生面板 */
+#typora-sidebar:not(.active-tab-backlinks) #backlinks-content {
+    display: none;
+}
+
+/* ===================================================================
+ * 面板内容样式
+ * =================================================================== */
+
+/* --- 头部 --- */
+.backlinks-header {
+    padding: 10px 16px 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    border-bottom: 1px solid var(--window-border, rgba(0, 0, 0, 0.07));
+}
+
+.backlinks-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--heading-text-color, #333);
+}
+
+.backlinks-count {
+    font-size: 11px;
+    color: var(--text-color, #999);
+    opacity: 0.5;
+}
+
+/* --- 分组标题 --- */
+.backlinks-section-header {
+    padding: 10px 16px 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-color, #999);
+    opacity: 0.45;
+}
+
+/* --- 反链条目 --- */
+.backlink-group {
+    padding: 5px 16px;
+    margin: 0;
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+.backlink-group:hover {
+    background: var(--item-hover-bg-color, rgba(0, 0, 0, 0.04));
+}
+
+.backlink-source {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--heading-text-color, #333);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 1px;
+}
+
+.backlink-source .file-icon {
+    margin-right: 3px;
+    opacity: 0.45;
+}
+
+/* --- 上下文片段 --- */
+.backlink-context {
+    font-size: 12px;
+    color: var(--text-color, #888);
+    opacity: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.5;
+}
+
+.backlink-context .highlight-link {
+    color: var(--active-file-text-color, var(--primary-color, #4a90d9));
+    font-weight: 500;
+}
+
+/* --- 空状态 --- */
+.backlinks-empty,
+.backlinks-no-vault {
+    text-align: center;
+    padding: 40px 16px;
+    color: var(--text-color, #999);
+    opacity: 0.45;
+    font-size: 13px;
+}
+
+.backlinks-empty .empty-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+    display: block;
+}
+
+/* ===================================================================
+ * 知识图谱 (Knowledge Graph / Graph View) 覆盖层
+ * =================================================================== */
+
+/* 全视口覆盖层 + 背景 */
+#graph-view-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 9990;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#graph-view-overlay .graph-view-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.40);
+    animation: graph-backdrop-in 0.25s ease-out;
+}
+
+@keyframes graph-backdrop-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* 面板 */
+#graph-view-overlay .graph-view-panel {
+    position: relative;
+    width: 92vw; height: 92vh;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.03),
+        0 8px 32px rgba(0, 0, 0, 0.14);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: graph-panel-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes graph-panel-in {
+    from { opacity: 0; transform: scale(0.95) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 退场动画 */
+#graph-view-overlay .graph-view-panel.closing {
+    animation: graph-panel-out 0.12s ease-in forwards;
+}
+
+@keyframes graph-panel-out {
+    from { opacity: 1; transform: scale(1) translateY(0); }
+    to   { opacity: 0; transform: scale(1) translateY(0); }
+}
+
+#graph-view-overlay .graph-view-backdrop.closing {
+    animation: graph-backdrop-out 0.12s ease-in forwards;
+}
+
+@keyframes graph-backdrop-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
+/* 头部栏 */
+#graph-view-overlay .graph-view-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+#graph-view-overlay .graph-view-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2C3038;
+    white-space: nowrap;
+}
+
+#graph-view-overlay .graph-view-stats {
+    font-size: 11px;
+    font-weight: 400;
+    color: #8B909A;
+    white-space: nowrap;
+}
+
+/* 搜索框 — pill 样式 */
+#graph-view-overlay .graph-view-search {
+    flex: 1;
+    max-width: 240px;
+    padding: 5px 14px;
+    font-size: 12px;
+    background: rgba(0, 0, 0, 0.025);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 20px;
+    outline: none;
+    color: #3C414D;
+    margin-left: auto;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+#graph-view-overlay .graph-view-search:focus {
+    border-color: rgba(95, 141, 211, 0.45);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 3px rgba(95, 141, 211, 0.08);
+}
+
+/* 关闭按钮 — 圆形 */
+#graph-view-overlay .graph-view-close-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #8B909A;
+    padding: 0;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s;
+}
+#graph-view-overlay .graph-view-close-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #3C414D;
+}
+
+/* ---- 设置按钮 ---- */
+#graph-view-overlay .graph-view-settings-btn {
+    width: 28px; height: 28px;
+    border: none;
+    background: none;
+    color: #8B909A;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    margin-right: 2px;
+}
+#graph-view-overlay .graph-view-settings-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #3C414D;
+}
+
+/* 渲染引擎切换按钮 */
+#graph-view-overlay .graph-view-engine-btn {
+    width: auto;
+    min-width: 34px;
+    height: 24px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.03);
+    color: #8B909A;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 12px;
+    padding: 0 8px;
+    line-height: 22px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    margin-right: 4px;
+}
+#graph-view-overlay .graph-view-engine-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: #3C414D;
+    border-color: rgba(0, 0, 0, 0.20);
+}
+
+/* ---- 设置面板（右侧滑出） ---- */
+#graph-view-overlay .graph-view-settings-panel {
+    position: absolute;
+    top: 0; right: 0;
+    width: 300px;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.97);
+    border-left: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+    z-index: 10;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+    overflow-y: auto;
+}
+#graph-view-overlay .graph-view-settings-panel.open {
+    transform: translateX(0);
+}
+
+.graph-settings-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.graph-settings-title {
+    font-size: 13px; font-weight: 600;
+    color: #2C3038;
+}
+.graph-settings-close {
+    width: 24px; height: 24px;
+    border: none; background: none;
+    font-size: 18px; color: #8B909A;
+    cursor: pointer; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+}
+.graph-settings-close:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #3C414D;
+}
+
+/* 参数组 */
+.graph-settings-group {
+    padding: 8px 16px 4px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+.graph-settings-group:last-of-type {
+    border-bottom: none;
+}
+.graph-settings-group-title {
+    font-size: 11px; font-weight: 600;
+    color: #A0A5B0;
+    text-transform: none;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+/* 滑块行 */
+.graph-settings-row {
+    display: flex; align-items: center;
+    padding: 3px 0;
+}
+.graph-settings-label {
+    flex: 0 0 80px;
+    font-size: 11px; color: #5C6068;
+}
+.graph-settings-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.10);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+.graph-settings-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 7px;
+    background: #5888D0;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.graph-settings-slider::-webkit-slider-thumb:hover {
+    background: #4070B8;
+}
+.graph-settings-value {
+    flex: 0 0 42px;
+    font-size: 10px; color: #8B909A;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 底部按钮 */
+.graph-settings-footer {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    margin-top: auto;
+}
+.graph-settings-reset {
+    width: 100%;
+    padding: 7px 0;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 6px;
+    font-size: 12px; color: #5C6068;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.graph-settings-reset:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #3C414D;
+}
+
+/* Canvas — 双 Canvas 堆叠容器 */
+#graph-view-overlay .graph-canvas-container {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+}
+#graph-view-overlay .graph-canvas-container canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+#graph-canvas-gpu {
+    z-index: 0;
+    pointer-events: none;
+}
+#graph-canvas-labels {
+    z-index: 1;
+    cursor: grab;
+}
+#graph-canvas-labels:active {
+    cursor: grabbing;
+}
+
+/* 底部提示 */
+#graph-view-overlay .graph-view-footer {
+    display: flex;
+    gap: 20px;
+    padding: 5px 20px;
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+#graph-view-overlay .graph-view-hint {
+    font-size: 10px;
+    color: #A0A5B0;
+}
+
+#graph-view-overlay .graph-view-hint:last-child {
+    margin-left: auto;
+}
+
+/* 反链面板中的图谱按钮 */
+.backlinks-graph-btn {
+    background: none;
+    border: 1px solid var(--window-border, rgba(0,0,0,0.1));
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 1px 8px;
+    opacity: 0.55;
+    transition: opacity 0.15s, background 0.15s;
+    line-height: 1.4;
+}
+.backlinks-graph-btn:hover {
+    opacity: 1;
+    background: var(--item-hover-bg-color, rgba(0,0,0,0.04));
+}
+
+/* ===================================================================
+ * Wikilink 渲染 — CSS Custom Highlight API (paint 层叠加，不碰 DOM)
+ * =================================================================== */
+
+/* 已解析的链接：蓝色下划线，可点击暗示 */
+::highlight(wikilink-resolved) {
+    color: #3b82f6;
+    text-decoration: underline;
+    text-decoration-color: rgba(59, 130, 246, 0.40);
+    text-underline-offset: 2px;
+}
+
+/* 断链（幽灵链接）：灰色虚线下划线，低存在感 */
+::highlight(wikilink-broken) {
+    color: #9ca3af;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-decoration-color: rgba(156, 163, 175, 0.45);
+    text-underline-offset: 2px;
+}
+
+/* 方括号：极淡，几乎不可见 */
+::highlight(wikilink-bracket) {
+    color: rgba(128, 128, 128, 0.18);
+}

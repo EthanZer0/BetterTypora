@@ -1,0 +1,26 @@
+{
+  "id": "git-sync",
+  "name": "Git 同步",
+  "version": "2.0.0",
+  "description": "手动同步笔记到 Git 仓库，支持本地版本控制和远程备份",
+  "author": "BetterTypora",
+  "main": "main.js",
+  "style": "style.css",
+  "enabled": true,
+  "hotkeys": [
+    { "command": "git-sync:toggle-panel",   "key": "Ctrl+Shift+V", "when": "always" },
+    { "command": "git-sync:quick-commit",   "key": "Ctrl+Shift+S", "when": "editorFocus" },
+    { "command": "git-sync:show-diff-current", "key": "Ctrl+Shift+D", "when": "editorFocus" }
+  ],
+  "settings": {
+    "remoteEnabled": false,
+    "remoteName": "origin",
+    "remoteURL": "",
+    "diffViewMode": "unified",
+    "maxHistoryCount": 50,
+    "pollIntervalMs": 5000,
+    "ignorePatterns": [".DS_Store", "*.tmp", "*.bak"],
+    "toolbarPosition": { "top": 120, "right": 8 },
+    "toolbarCollapsed": false
+  }
+}

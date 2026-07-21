@@ -1,0 +1,22 @@
+{
+  "id": "tabs",
+  "name": "标签页",
+  "version": "1.0.0",
+  "description": "为 Typora 添加多标签页支持, 像浏览器一样管理多个打开的文档",
+  "author": "BetterTypora",
+  "main": "main.js",
+  "style": "style.css",
+  "enabled": true,
+  "hotkeys": [
+    { "command": "tabs:next-tab",     "key": "Ctrl+Tab",       "when": "editorFocus" },
+    { "command": "tabs:prev-tab",     "key": "Ctrl+Shift+Tab", "when": "editorFocus" },
+    { "command": "tabs:close-tab",    "key": "Ctrl+W",         "when": "editorFocus" },
+    { "command": "tabs:reopen-tab",   "key": "Ctrl+Shift+T",   "when": "editorFocus" }
+  ],
+  "settings": {
+    "maxTabs": 20,
+    "showCloseButton": true,
+    "confirmBeforeClose": true,
+    "restoreOnStartup": true
+  }
+}
