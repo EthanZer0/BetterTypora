@@ -80,6 +80,7 @@
             } catch (e) {
                 diffResult = {
                     leftHtml: "<p>渲染失败: " + e.message + "</p>",
+                    rightHtml: "<p>渲染失败: " + e.message + "</p>",
                     stats: { additions: 0, deletions: 0 }
                 };
             }
