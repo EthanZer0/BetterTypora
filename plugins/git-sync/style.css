@@ -1253,6 +1253,7 @@
 
 .git-rev-stats-add { color: #2ea043; font-weight: 600; }
 .git-rev-stats-del { color: #cf222e; font-weight: 600; margin-left: 6px; }
+.git-rev-stats-mod { color: #d4a72c; font-weight: 600; margin-left: 6px; }
 
 .git-rev-btn {
   padding: 4px 10px;
@@ -1275,7 +1276,6 @@
 
 /* 让 Typora 渲染内容在修订面板中正常显示 */
 #git-revision-view [contenteditable] { outline: none; }
-#git-revision-view .md-meta { display: inline; }
 
 /* ── 紧凑工具栏（无标签栏时：关闭按钮悬浮右上角）── */
 .git-rev-toolbar--compact {
@@ -1303,121 +1303,32 @@
 }
 
 /* -------------------------------------------------------------------
- * Diff Markers (unchanged)
+ * Diff Markers — 简约块级标注，无文字标签
  * ------------------------------------------------------------------- */
 
-/* -- Diff 标注 -- */
-.git-rev-add {
-  background: rgba(46, 160, 67, 0.15);
-  text-decoration: underline;
-  text-decoration-color: #2ea043;
-  text-underline-offset: 2px;
-  border-radius: 2px;
-  padding: 0 1px;
-}
-
-.git-rev-del {
-  color: #cf222e;
-  text-decoration: line-through;
-  text-decoration-color: #cf222e;
-  background: rgba(248, 81, 73, 0.08);
-  border-radius: 2px;
-  padding: 0 1px;
-}
-
-/* -- 块级新增/删除 -- */
+/* 新增：绿色左边框 */
 .git-rev-block-add {
-  background: rgba(46, 160, 67, 0.06);
   border-left: 3px solid #2ea043;
-  margin: 0 -30px;
-  padding: 0 30px 0 27px;
-  position: relative;
+  background: rgba(46, 160, 67, 0.06);
 }
 
+/* 修改：琥珀色左边框 */
+.git-rev-block-mod {
+  border-left: 3px solid #d4a72c;
+  background: rgba(212, 167, 44, 0.06);
+}
+
+/* 删除：红色左边框 */
 .git-rev-block-del {
-  background: rgba(248, 81, 73, 0.06);
   border-left: 3px solid #cf222e;
-  margin: 0 -30px;
-  padding: 0 30px 0 27px;
-  position: relative;
-  color: var(--text-color, #888);
+  background: rgba(248, 81, 73, 0.06);
 }
 
-.git-rev-block-label {
-  position: absolute;
-  right: 8px;
-  top: 2px;
-  font-size: 10px;
-  font-weight: 600;
-  opacity: 0.6;
-}
-.git-rev-block-add .git-rev-block-label { color: #2ea043; }
-.git-rev-block-del .git-rev-block-label { color: #cf222e; }
-
-/* subtree 包装器：<del>/<mark> 纯 inline，不干扰子元素 display */
-del.git-rev-subtree-del,
-mark.git-rev-subtree-add {
-  display: inline;
-  text-decoration: none;
-  background: none;
-  color: inherit;
-  position: relative;
-}
-del.git-rev-subtree-del {
-  text-decoration: line-through;
-  text-decoration-color: #cf222e;
-  background: rgba(248, 81, 73, 0.08);
-}
-mark.git-rev-subtree-add {
-  background: rgba(46, 160, 67, 0.12);
-}
-del.git-rev-subtree-del::before {
-  content: attr(data-label);
-  font-size: 9px;
-  font-weight: 600;
-  color: #cf222e;
-  margin-right: 2px;
-  opacity: 0.7;
-  text-decoration: none;
-  display: inline;
-}
-mark.git-rev-subtree-add::before {
-  content: attr(data-label);
-  font-size: 9px;
-  font-weight: 600;
-  color: #2ea043;
-  margin-right: 2px;
-  opacity: 0.7;
-  display: inline;
-}
-
-/* inline 包装器：<p> 内不能放 <div>，用 <span> + display:inline-block 安全替代 */
-span.git-rev-block-add,
-span.git-rev-block-del {
-  display: inline-block;
-  border-left: 3px solid;
-  margin: 0 1px;
-  padding: 0 4px;
-  position: relative;
-  border-radius: 3px;
-}
-span.git-rev-block-add { border-color: #2ea043; background: rgba(46, 160, 67, 0.1); }
-span.git-rev-block-del { border-color: #cf222e; background: rgba(248, 81, 73, 0.1); }
-span.git-rev-block-add .git-rev-block-label,
-span.git-rev-block-del .git-rev-block-label {
-  position: static;
-  margin-right: 2px;
-  font-size: 9px;
-}
-
-/* -- 空行占位 -- */
+/* 新增占位（后备，如无 block 可渲染） */
 .git-rev-empty {
   min-height: 1.6em;
-  background: rgba(127, 127, 127, 0.03);
-}
-
-.git-rev-row {
-  min-height: 1.2em;
+  border-left: 3px solid #2ea043;
+  background: rgba(46, 160, 67, 0.06);
 }
 
 /* -- 加载/错误状态 -- */
@@ -1434,7 +1345,6 @@ span.git-rev-block-del .git-rev-block-label {
 
 /* Typora cid/contenteditable/md-inline 在修订视图中无需作用 */
 #git-revision-view [contenteditable] { outline: none; }
-#git-revision-view .md-meta { display: inline; }
 
 /* -------------------------------------------------------------------
  * Init Overlay — 覆盖面板内容区，仓库未初始化时显示

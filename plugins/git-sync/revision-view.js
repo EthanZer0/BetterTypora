@@ -56,7 +56,14 @@
         // ── ❶ 保存当前上下文 ──
         _currentHash = hash;
         _currentFilePath = filePath || _store.state.currentFilePath;
-        var newHtml = writeEl.innerHTML;
+
+        // 深克隆 #write 的所有子元素（保留 MathJax/链接等完整渲染状态）
+        var newKids = [];
+        for (var wi = 0; wi < writeEl.children.length; wi++) {
+            var wc = writeEl.children[wi];
+            if (wc.tagName === "P" && !wc.textContent.trim()) continue;
+            newKids.push(wc.cloneNode(true));
+        }
 
         // 文件路径（回退逻辑直接更新 _currentFilePath，确保恢复按钮可用）
         var repoPath = _store.state.repoPath;
@@ -69,29 +76,70 @@
 
         var relPath = _getRelativePath(_currentFilePath);
 
-        // ── ❷ 获取旧版本 → 渲染 → DOM 重构 ──
+        // ── ❷ 获取旧版 markdown → 渲染 → DOM 重构 ──
+        // 同时获取当前 markdown 源码用于块对齐（绕过渲染差异）
+        var newMdPromise;
+        try {
+            newMdPromise = File.getContent(_currentFilePath);
+        } catch (e) {
+            newMdPromise = Promise.resolve("");
+        }
+
         _git.showFile(repoPath, hash, relPath).then(function (result) {
             var oldMd = result.success ? result.output : "";
             if (!result.success && result.error) { oldMd = "# 无法获取旧版本\n" + result.error; }
 
-            var diffResult = null;
-            try {
-                diffResult = _renderer.renderRevision(oldMd || "", newHtml, _editor, { hash: hash });
-            } catch (e) {
-                diffResult = {
-                    leftHtml: "<p>渲染失败: " + e.message + "</p>",
-                    rightHtml: "<p>渲染失败: " + e.message + "</p>",
-                    stats: { additions: 0, deletions: 0 }
-                };
-            }
+            return newMdPromise.then(function (newMd) {
+                // prepareRevision 返回 { aligned, oldHtml }
+                var prep = _renderer.prepareRevision(oldMd || "", newMd || "", _editor);
 
-            try {
-                _buildRevisionLayout(contentEl, writeEl, diffResult.leftHtml, diffResult.rightHtml, hash, diffResult.stats);
-            } catch (e) {
-                // _buildRevisionLayout 内部异常时 close() 回滚 DOM 状态
-                close();
-                window.BetterTypora.toast("修订视图错误: " + (e.message || "未知错误"), 3000);
-            }
+                // 旧版子元素（_renderMdToHtml 产物，不得已走字符串）
+                var oldKids = [];
+                var oldContainer = document.createElement("div");
+                oldContainer.innerHTML = prep.oldHtml || "";
+                for (var oi = 0; oi < oldContainer.children.length; oi++) {
+                    var oc = oldContainer.children[oi];
+                    if (oc.tagName === "P" && !oc.textContent.trim()) continue;
+                    oldKids.push(oc);
+                }
+
+                // 构建最终子元素列表 + marks
+                var outKids = [];
+                var marks = [];
+                var adds = 0, dels = 0, mods = 0;
+
+                for (var ai = 0; ai < prep.aligned.length; ai++) {
+                    var p = prep.aligned[ai];
+
+                    if (p.s === "deleted") {
+                        if (p.l >= 0 && p.l < oldKids.length) {
+                            outKids.push(oldKids[p.l].cloneNode(true));
+                            marks.push({ idx: outKids.length - 1, status: "deleted" });
+                        }
+                        dels++;
+                    } else {
+                        if (p.r >= 0 && p.r < newKids.length) {
+                            // cloneNode(true) 保留完整 MathJax SVG 等渲染
+                            outKids.push(newKids[p.r].cloneNode(true));
+                            if (p.s !== "same") {
+                                marks.push({ idx: outKids.length - 1, status: p.s });
+                            }
+                            if (p.s === "modified") mods++;
+                            else if (p.s === "added") adds++;
+                        }
+                    }
+                }
+
+                var revisionData = { children: outKids, marks: marks };
+                var stats = { additions: adds, deletions: dels, modifications: mods };
+
+                try {
+                    _buildRevisionLayout(contentEl, writeEl, revisionData, hash, stats);
+                } catch (e) {
+                    close();
+                    window.BetterTypora.toast("修订视图错误: " + (e.message || "未知错误"), 3000);
+                }
+            });
         }).catch(function (err) {
             window.BetterTypora.toast("修订视图错误: " + (err.message || "未知错误"), 3000);
         });
@@ -101,7 +149,7 @@
     // DOM 重构（纯 DOM 操作，不触碰 Typora editor）
     // ===================================================================
 
-    function _buildRevisionLayout(contentEl, writeEl, oldHtml, newHtml, hash, stats) {
+    function _buildRevisionLayout(contentEl, writeEl, revisionData, hash, stats) {
         var leftWrapper = document.createElement("div");
         leftWrapper.id = "git-rev-left";
 
@@ -109,17 +157,12 @@
             leftWrapper.appendChild(contentEl.firstChild);
         }
 
-        // wrapper 放回 content（现在 content 是空的，wrapper 是唯一子元素）
         contentEl.appendChild(leftWrapper);
-
-        // ── ❷ 设置 content 为 flex row ──
         contentEl.style.display = "flex";
         contentEl.style.flexDirection = "row";
         contentEl.style.overflow = "hidden";
-        // ⚠ 不改 content 的 position / top / bottom / left / right
-        // ⚠ 不改 #write 的任何属性
 
-        // ── ❸ 创建修订面板（右列）──
+        // ── 创建修订面板（右列）──
         var shell = document.createElement("div");
         shell.id = "git-revision-view";
         shell.setAttribute("data-plugin-id", "git-sync");
@@ -129,37 +172,37 @@
             '<span id="git-rev-title" class="git-rev-title">📜 修订视图</span>' +
             '<button class="git-rev-btn git-rev-btn-danger" data-action="restore">↺ 恢复至此版本</button>' +
             '</div>' +
-            '<div id="git-rev-col" class="git-rev-body">' +
-            '<div class="git-rev-loading">⏳ 加载旧版本...</div>' +
-            '</div>' +
             '<div class="git-rev-statusbar" id="git-rev-statusbar"></div>';
 
         contentEl.appendChild(shell);
         _viewEl = shell;
         _isOpen = true;
 
-        // ── ❸b 克隆 #write 的结构到修订面板内容区 ──
-        // 浅克隆复制标签名 + 所有 HTML 属性 (class, data-*, 等)
-        // 但不复制子节点、事件监听器、JS expando 属性
-        var revCol = document.getElementById("git-rev-col");
-        if (revCol && writeEl) {
-            var clone = writeEl.cloneNode(false);  // 浅克隆：只复制元素标签 + 属性
-            clone.id = "git-rev-col";
-            clone.classList.add("git-rev-body");  // 追加我们的布局类
-            clone.removeAttribute("contenteditable");  // 只读
-            // 保留 loading 提示文字，其余属性原样继承
-            clone.innerHTML = revCol.innerHTML;
-            revCol.parentNode.replaceChild(clone, revCol);
+        // ── 右列内容区 ──
+        var revContent = document.createElement("div");
+        revContent.id = "git-rev-col";
+        revContent.className = writeEl.className + " git-rev-body";
+        for (var ai = 0; ai < writeEl.attributes.length; ai++) {
+            var attr = writeEl.attributes[ai];
+            if (attr.name === "id" || attr.name === "contenteditable") continue;
+            revContent.setAttribute(attr.name, attr.value);
         }
+        revContent.removeAttribute("contenteditable");
 
-        // ── ❸c 动态匹配标签栏高度 ──
+        // 直接 appendChild cloneNode 节点（不经过字符串，保留渲染状态）
+        for (var ki = 0; ki < revisionData.children.length; ki++) {
+            revContent.appendChild(revisionData.children[ki]);
+        }
+        shell.appendChild(revContent);
+
+        // ── 动态匹配标签栏高度 ──
         var toolbar = shell.querySelector(".git-rev-toolbar");
         var tabBar = document.getElementById("typora-tab-bar");
         var tabEffectiveHeight = 0;
         if (tabBar) {
             var tabCs = getComputedStyle(tabBar);
             if (tabCs.display !== "none") {
-                tabEffectiveHeight = tabBar.offsetHeight; // 32 或 34 (native-window)
+                tabEffectiveHeight = tabBar.offsetHeight;
             }
         }
         if (toolbar) {
@@ -167,25 +210,36 @@
                 toolbar.style.height = tabEffectiveHeight + "px";
                 toolbar.style.display = "";
             } else {
-                // 无标签栏时：工具栏最小化，关闭按钮悬浮
                 toolbar.classList.add("git-rev-toolbar--compact");
             }
         }
 
-        // ── ❸d 克隆 #write 作用域的主题样式到 #git-rev-col ──
+        // ── 在克隆体上注入差异 CSS 类 ──
+        if (revisionData.marks && revContent.children.length > 0) {
+            var children = revContent.children;
+            for (var mi = 0; mi < revisionData.marks.length; mi++) {
+                var mark = revisionData.marks[mi];
+                if (mark.idx >= 0 && mark.idx < children.length) {
+                    var el = children[mark.idx];
+                    if (mark.status === "modified") el.classList.add("git-rev-block-mod");
+                    else if (mark.status === "added") el.classList.add("git-rev-block-add");
+                    else if (mark.status === "deleted") el.classList.add("git-rev-block-del");
+                }
+            }
+        }
+
+        // ── 克隆 #write 的主题样式到 #git-rev-col ──
         _cloneWriteStyles();
 
         _bindEvents();
 
-        // ── ❹ 注入新版+新增标注 HTML（已在 DOM 重构前渲染完成）──
-        var col = document.getElementById("git-rev-col");
-        col.innerHTML = newHtml || '<p class="git-rev-empty-msg">(无内容)</p>';
         var titleEl = document.getElementById("git-rev-title");
         if (titleEl) titleEl.textContent = "📜 对比 " + hash.substring(0, 7);
         var statusbar = document.getElementById("git-rev-statusbar");
         if (statusbar && stats) {
             statusbar.innerHTML =
                 '<span class="git-rev-stats-add">+' + (stats.additions || 0) + '</span> ' +
+                '<span class="git-rev-stats-mod">~' + (stats.modifications || 0) + '</span> ' +
                 '<span class="git-rev-stats-del">-' + (stats.deletions || 0) + '</span>';
         }
         _initSyncScroll();
@@ -237,7 +291,7 @@
             leftWrapper.parentNode.removeChild(leftWrapper);
         }
 
-        // 5. 恢复 content 样式（只清我们设的 3 个属性）
+        // 5. 恢复 content 样式
         if (contentEl) {
             contentEl.style.display = "";
             contentEl.style.flexDirection = "";
@@ -249,6 +303,10 @@
         if (clonedStyle && clonedStyle.parentNode) clonedStyle.parentNode.removeChild(clonedStyle);
 
         // 7. #write 完全没有被修改过，无需恢复
+
+        // 6. 清理克隆的主题样式
+        var clonedStyle = document.getElementById("git-rev-cloned-styles");
+        if (clonedStyle && clonedStyle.parentNode) clonedStyle.parentNode.removeChild(clonedStyle);
 
         // 7. 重置模块级状态
         _currentHash = "";
@@ -355,22 +413,6 @@
         };
     }
 
-    // ===================================================================
-    // 动态样式克隆 — 将 #write 作用域的主题规则克隆到 #git-rev-col
-    // ===================================================================
-
-    /**
-     * 遍历 document.styleSheets，找出所有 #write 开头的 CSS 规则，
-     * 将 #write 替换为 #git-rev-col，作为临时 <style> 注入 <head>。
-     *
-     * 排除规则：
-     *   - 含 .md-focus / .CodeMirror / .code-tooltip / typewriter /
-     *     .typora- / .on-focus-mode / .md-meta-block 的选择器
-     *   - #write:after / #write:before 容器伪元素
-     *
-     * 递归处理 @media / @supports，保留其包装结构，确保暗色模式切换
-     * 等条件规则不受影响。
-     */
     function _cloneWriteStyles() {
         var exclude = [
             ".md-focus", ".CodeMirror", ".code-tooltip", "typewriter",
@@ -383,15 +425,16 @@
 
         var css = "";
         var sheets = document.styleSheets;
-
         for (var i = 0; i < sheets.length; i++) {
             var rules;
-            try { rules = sheets[i].cssRules; } catch (e) { /* 跨域样式表 */ continue; }
+            try { rules = sheets[i].cssRules; } catch (e) { continue; }
             if (!rules) continue;
             css += _collectCss(rules, exclude, excludePseudo);
         }
 
-        // 移除旧的克隆（如果存在）
+        // 追加全局 MathJax 样式（非 #write 作用域的规则需显式注入）
+        css += _collectMathJaxStyles(sheets);
+
         var old = document.getElementById("git-rev-cloned-styles");
         if (old && old.parentNode) old.parentNode.removeChild(old);
 
@@ -403,14 +446,36 @@
         }
     }
 
-    /**
-     * 递归收集 CSS 规则。
-     *  - type 1 (STYLE_RULE): 选择器含 #write 且不含排除标记 → 替换后输出
-     *  - type 4 (MEDIA_RULE): 递归 → 用 @media 包装
-     *  - type 12 (SUPPORTS_RULE): 递归 → 用 @supports 包装
-     *  - type 3 (IMPORT_RULE): 尝试递归（同源 @import）
-     *  其余类型跳过。
-     */
+    // 收集全局 MathJax 样式（不带 #write 前缀的 MJX 规则）
+    function _collectMathJaxStyles(sheets) {
+        var out = "";
+        for (var i = 0; i < sheets.length; i++) {
+            var rules;
+            try { rules = sheets[i].cssRules; } catch (e) { continue; }
+            if (!rules) continue;
+            for (var j = 0; j < rules.length; j++) {
+                var rule = rules[j];
+                try {
+                    if (rule.type === 1) {
+                        var sel = rule.selectorText;
+                        if (!sel) continue;
+                        // 收集 MathJax/MJX 相关的全局样式
+                        if (sel.indexOf("#write") === -1 &&
+                            /(mjx-container|MJX|MathJax|\.md-math\b|\.md-math-block|\.md-inline-math|math\b)/i.test(sel) &&
+                            !/mtext|merror/.test(sel)) {
+                            // 限制作用域到修订面板
+                            out += "#git-rev-col " + sel + " { " + rule.style.cssText + " }\n";
+                        }
+                    } else if (rule.type === 4 || rule.type === 12) {
+                        var inner = _collectMathJaxStyles([rule]);
+                        if (inner) out += (rule.type === 4 ? "@media " : "@supports ") + (rule.conditionText || "") + " {\n" + inner + "}\n";
+                    }
+                } catch (e) {}
+            }
+        }
+        return out;
+    }
+
     function _collectCss(rules, exclude, excludePseudo) {
         var out = "";
         for (var j = 0; j < rules.length; j++) {
@@ -440,13 +505,13 @@
                 } else if (t === 12) { // SUPPORTS_RULE
                     var inner = _collectCss(rule.cssRules, exclude, excludePseudo);
                     if (inner) out += "@supports " + (rule.conditionText || "") + " {\n" + inner + "}\n";
-                } else if (t === 3) { // IMPORT_RULE — 尝试同源导入
+                } else if (t === 3) { // IMPORT_RULE
                     var importedSheet = rule.styleSheet;
                     if (importedSheet) {
                         try { out += _collectCss(importedSheet.cssRules, exclude, excludePseudo); } catch (e) {}
                     }
                 }
-            } catch (e) { /* 个别规则不可访问，跳过 */ }
+            } catch (e) {}
         }
         return out;
     }
