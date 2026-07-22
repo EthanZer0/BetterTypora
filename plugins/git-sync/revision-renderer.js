@@ -1,11 +1,15 @@
 /**
  * Git Plugin — 修订视图渲染器
  * ==============================
- * Markdown 源码对齐 + 旧版渲染（仅 deleted 块）。
- * 不构建 DOM——由 revision-view.js 直接操作克隆体。
+ * 统一通过 _renderMdToHtml 渲染两侧内容，MathJax typeset 在 revision-view.js
+ * 插入 DOM 后调用。
  */
 (function () {
     "use strict";
+
+    // ===================================================================
+    // Markdown 源码 → 块切分
+    // ===================================================================
 
     function parseMdBlocks(md) {
         if (!md) return [];
@@ -26,7 +30,8 @@
     function mdDigest(md) { return md.replace(/\s+/g, " ").trim().substring(0, 120); }
 
     function alignMdBlocks(oldBlocks, newBlocks) {
-        var r = [], used = {}, i = 0, j = 0;
+        var r = [], used = {};
+        var i = 0, j = 0;
         while (i < oldBlocks.length && j < newBlocks.length) {
             var a = mdDigest(oldBlocks[i]), b = mdDigest(newBlocks[j]);
             if (a === b) { r.push({ l: i, r: j, s: "same" }); i++; j++; continue; }
@@ -55,19 +60,52 @@
         return r;
     }
 
-    // 返回对齐结果 + 旧版渲染 HTML（仅 deleted 块需要）
+    // ===================================================================
+    // 统一渲染：两侧都用 _renderMdToHtml → 解析为 DOM → 对齐 → 组装
+    // ===================================================================
+
+    /**
+     * @param {string} oldMd  — 旧版 markdown 源码
+     * @param {string} newMd  — 当前 markdown 源码
+     * @param {object} editor — 编辑器引用（未使用，保留签名兼容性）
+     * @returns {{ aligned: array, oldKids: Element[], newKids: Element[] }}
+     */
     function prepareRevision(oldMd, newMd, editor) {
-        var aligned = alignMdBlocks(parseMdBlocks(oldMd || ""), parseMdBlocks(newMd || ""));
+        var oldBlocks = parseMdBlocks(oldMd || "");
+        var newBlocks = parseMdBlocks(newMd || "");
+        var aligned = alignMdBlocks(oldBlocks, newBlocks);
+
+        // 两侧都通过 Typora 内部 API 渲染为 HTML
         var oldHtml = "";
-        try { oldHtml = _renderMdToHtml(editor, oldMd || ""); } catch (e) {}
-        return { aligned: aligned, oldHtml: oldHtml };
+        var newHtml = "";
+        try { oldHtml = _renderMdToHtml(oldMd || ""); } catch (e) {}
+        try { newHtml = _renderMdToHtml(newMd || ""); } catch (e) {}
+
+        // 解析为 DOM 元素数组（跳过空 <p>）
+        function htmlToKids(html) {
+            var container = document.createElement("div");
+            container.innerHTML = html || "";
+            var kids = [];
+            for (var i = 0; i < container.children.length; i++) {
+                var c = container.children[i];
+                if (c.tagName === "P" && !c.textContent.trim()) continue;
+                kids.push(c);
+            }
+            return kids;
+        }
+
+        return {
+            aligned: aligned,
+            oldKids: htmlToKids(oldHtml),
+            newKids: htmlToKids(newHtml)
+        };
     }
 
     // ===================================================================
     // Typora 渲染
     // ===================================================================
 
-    function _renderMdToHtml(editor, md) {
+    function _renderMdToHtml(md) {
         var F = window.File, N = window.NodeDef;
         if (!F || !N || !F.editor) return "";
         var Ctor = F.editor.nodeMap.constructor;

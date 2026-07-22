@@ -3,6 +3,10 @@
  * ===============================
  * Wrapper 分屏方案：不修改 #write 任何样式，将 <content> 的所有子元素移入
  * wrapper 作为左列，修订面板作为右列。关闭时子元素原样回到 <content>。
+ *
+ * 渲染链路：
+ *   prepareRevision(oldMd, newMd) → { aligned, oldKids, newKids }
+ *   两侧都使用 Typora 内部 API 渲染 → MathJax.typesetPromise() 在 DOM 插入后调用
  */
 (function () {
     "use strict";
@@ -11,17 +15,17 @@
     var _viewEl = null;
     var _isOpen = false;
     var _syncScrollActive = false;
-    var _currentHash = "";             // 当前查看的版本 hash
-    var _currentFilePath = "";         // 当前查看的文件路径
-    var _restoring = false;            // 防止双击恢复并发
-    var _closeTimer = null;            // 异步关闭定时器，用于取消竞态
+    var _currentHash = "";
+    var _currentFilePath = "";
+    var _restoring = false;
+    var _closeTimer = null;
 
     function init(api, repoStore, gitCore, renderer) {
         _api = api; _store = repoStore; _git = gitCore; _renderer = renderer;
     }
 
     // ===================================================================
-    // 相对路径工具（含目录名前缀碰撞防护）
+    // 相对路径工具
     // ===================================================================
 
     function _getRelativePath(filePath) {
@@ -41,69 +45,41 @@
     // ===================================================================
 
     function open(hash, filePath) {
-        // 取消进行中的异步关闭，防止 _doClose 破坏新布局
         if (_closeTimer) { clearTimeout(_closeTimer); _closeTimer = null; }
-        // 如果已打开（无关闭动画），同步清理掉当前视图
-        if (_isOpen) {
-            _doClose(_viewEl);
-        }
+        if (_isOpen) { _doClose(_viewEl); }
         if (!_editor) { try { _editor = window.editor; } catch (e) {} }
 
         var writeEl = document.getElementById("write");
         var contentEl = document.querySelector("content");
         if (!writeEl || !contentEl) { window.BetterTypora.toast("找不到编辑器", 2000); return; }
 
-        // ── ❶ 保存当前上下文 ──
         _currentHash = hash;
         _currentFilePath = filePath || _store.state.currentFilePath;
 
-        // 深克隆 #write 的所有子元素（保留 MathJax/链接等完整渲染状态）
-        var newKids = [];
-        for (var wi = 0; wi < writeEl.children.length; wi++) {
-            var wc = writeEl.children[wi];
-            if (wc.tagName === "P" && !wc.textContent.trim()) continue;
-            newKids.push(wc.cloneNode(true));
-        }
-
-        // 文件路径（回退逻辑直接更新 _currentFilePath，确保恢复按钮可用）
         var repoPath = _store.state.repoPath;
         if (!repoPath) { window.BetterTypora.toast("未检测到仓库路径", 3000); return; }
         if (!_currentFilePath) _currentFilePath = _store.state.currentFilePath;
         if (!_currentFilePath) {
-            try { if (!_currentFilePath) _currentFilePath = BetterTypora.getCurrentFile(); } catch (e) {}
+            try { _currentFilePath = BetterTypora.getCurrentFile(); } catch (e) {}
         }
         if (!_currentFilePath) { window.BetterTypora.toast("无法确定当前文件路径", 3000); return; }
 
         var relPath = _getRelativePath(_currentFilePath);
 
-        // ── ❷ 获取旧版 markdown → 渲染 → DOM 重构 ──
-        // 同时获取当前 markdown 源码用于块对齐（绕过渲染差异）
+        // 获取当前 markdown 源码
         var newMdPromise;
-        try {
-            newMdPromise = File.getContent(_currentFilePath);
-        } catch (e) {
-            newMdPromise = Promise.resolve("");
-        }
+        try { newMdPromise = File.getContent(_currentFilePath); }
+        catch (e) { newMdPromise = Promise.resolve(""); }
 
         _git.showFile(repoPath, hash, relPath).then(function (result) {
-            var oldMd = result.success ? result.output : "";
-            if (!result.success && result.error) { oldMd = "# 无法获取旧版本\n" + result.error; }
+            var oldMd = (result.success && result.output) ? result.output : "";
 
             return newMdPromise.then(function (newMd) {
-                // prepareRevision 返回 { aligned, oldHtml }
+                // prepareRevision 现在返回 { aligned, oldKids, newKids }
+                // 两侧都用 _renderMdToHtml 渲染（统一管线）
                 var prep = _renderer.prepareRevision(oldMd || "", newMd || "", _editor);
 
-                // 旧版子元素（_renderMdToHtml 产物，不得已走字符串）
-                var oldKids = [];
-                var oldContainer = document.createElement("div");
-                oldContainer.innerHTML = prep.oldHtml || "";
-                for (var oi = 0; oi < oldContainer.children.length; oi++) {
-                    var oc = oldContainer.children[oi];
-                    if (oc.tagName === "P" && !oc.textContent.trim()) continue;
-                    oldKids.push(oc);
-                }
-
-                // 构建最终子元素列表 + marks
+                // 按照对齐结果组装输出子元素
                 var outKids = [];
                 var marks = [];
                 var adds = 0, dels = 0, mods = 0;
@@ -112,20 +88,16 @@
                     var p = prep.aligned[ai];
 
                     if (p.s === "deleted") {
-                        if (p.l >= 0 && p.l < oldKids.length) {
-                            outKids.push(oldKids[p.l].cloneNode(true));
+                        if (p.l >= 0 && p.l < prep.oldKids.length) {
+                            outKids.push(prep.oldKids[p.l]);
                             marks.push({ idx: outKids.length - 1, status: "deleted" });
                         }
                         dels++;
                     } else {
-                        if (p.r >= 0 && p.r < newKids.length) {
-                            // cloneNode(true) 保留完整 MathJax SVG 等渲染
-                            outKids.push(newKids[p.r].cloneNode(true));
-                            if (p.s !== "same") {
-                                marks.push({ idx: outKids.length - 1, status: p.s });
-                            }
-                            if (p.s === "modified") mods++;
-                            else if (p.s === "added") adds++;
+                        if (p.r >= 0 && p.r < prep.newKids.length) {
+                            outKids.push(prep.newKids[p.r]);
+                            if (p.s === "modified") { marks.push({ idx: outKids.length - 1, status: p.s }); mods++; }
+                            else if (p.s === "added") { marks.push({ idx: outKids.length - 1, status: p.s }); adds++; }
                         }
                     }
                 }
@@ -146,10 +118,11 @@
     }
 
     // ===================================================================
-    // DOM 重构（纯 DOM 操作，不触碰 Typora editor）
+    // DOM 重构
     // ===================================================================
 
     function _buildRevisionLayout(contentEl, writeEl, revisionData, hash, stats) {
+        // ── 左列 wrapper ──
         var leftWrapper = document.createElement("div");
         leftWrapper.id = "git-rev-left";
 
@@ -162,7 +135,7 @@
         contentEl.style.flexDirection = "row";
         contentEl.style.overflow = "hidden";
 
-        // ── 创建修订面板（右列）──
+        // ── 修订面板（右列）──
         var shell = document.createElement("div");
         shell.id = "git-revision-view";
         shell.setAttribute("data-plugin-id", "git-sync");
@@ -189,13 +162,27 @@
         }
         revContent.removeAttribute("contenteditable");
 
-        // 直接 appendChild cloneNode 节点（不经过字符串，保留渲染状态）
+        // appendChild 插入所有子元素（不经过字符串，math 等保留 Typora 原始 DOM 结构）
         for (var ki = 0; ki < revisionData.children.length; ki++) {
             revContent.appendChild(revisionData.children[ki]);
         }
         shell.appendChild(revContent);
 
-        // ── 动态匹配标签栏高度 ──
+        // ── 贴上 diff 标记 ──
+        if (revisionData.marks && revContent.children.length > 0) {
+            var children = revContent.children;
+            for (var mi = 0; mi < revisionData.marks.length; mi++) {
+                var mark = revisionData.marks[mi];
+                if (mark.idx >= 0 && mark.idx < children.length) {
+                    var el = children[mark.idx];
+                    if (mark.status === "modified") el.classList.add("git-rev-block-mod");
+                    else if (mark.status === "added") el.classList.add("git-rev-block-add");
+                    else if (mark.status === "deleted") el.classList.add("git-rev-block-del");
+                }
+            }
+        }
+
+        // ── 匹配标签栏高度 ──
         var toolbar = shell.querySelector(".git-rev-toolbar");
         var tabBar = document.getElementById("typora-tab-bar");
         var tabEffectiveHeight = 0;
@@ -214,22 +201,11 @@
             }
         }
 
-        // ── 在克隆体上注入差异 CSS 类 ──
-        if (revisionData.marks && revContent.children.length > 0) {
-            var children = revContent.children;
-            for (var mi = 0; mi < revisionData.marks.length; mi++) {
-                var mark = revisionData.marks[mi];
-                if (mark.idx >= 0 && mark.idx < children.length) {
-                    var el = children[mark.idx];
-                    if (mark.status === "modified") el.classList.add("git-rev-block-mod");
-                    else if (mark.status === "added") el.classList.add("git-rev-block-add");
-                    else if (mark.status === "deleted") el.classList.add("git-rev-block-del");
-                }
-            }
-        }
-
-        // ── 克隆 #write 的主题样式到 #git-rev-col ──
+        // ── 克隆主题样式 ──
         _cloneWriteStyles();
+
+        // ── MathJax 渲染：对修订面板内容进行 typeset ──
+        _typesetMathAfterDom(revContent);
 
         _bindEvents();
 
@@ -246,6 +222,41 @@
     }
 
     // ===================================================================
+    // MathJax 渲染
+    // ===================================================================
+
+    /**
+     * DOM 插入后调用 MathJax.typesetPromise() 渲染数学公式。
+     * Typora 的 _renderMdToHtml 输出原始 HTML（含 .md-math-block / .md-inline-math
+     * 及 LaTeX 源码），不会预先渲染为 SVG。需要 MathJax 对插入的 DOM 做 typeset。
+     */
+    function _typesetMathAfterDom(container) {
+        // 检查是否真的有数学内容
+        if (!container.querySelector(".md-math-block, .md-inline-math, .md-math")) return;
+
+        // MathJax v3
+        if (typeof MathJax !== "undefined" && MathJax.typesetPromise) {
+            MathJax.typesetPromise([container]).catch(function (err) {
+                if (typeof console !== "undefined" && console.warn) {
+                    console.warn("[git-sync] MathJax typeset failed:", err);
+                }
+            });
+            return;
+        }
+
+        // MathJax v2 回退
+        if (typeof MathJax !== "undefined" && MathJax.Hub && MathJax.Hub.Queue) {
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub, container]);
+            return;
+        }
+
+        // 兜底：全局遍历触发（某些 MathJax 配置不支持指定容器）
+        if (typeof MathJax !== "undefined" && typeof MathJax.typeset === "function") {
+            MathJax.typeset([container]);
+        }
+    }
+
+    // ===================================================================
     // 关闭
     // ===================================================================
 
@@ -253,12 +264,10 @@
         _isOpen = false;
         _syncScrollActive = false;
 
-        // 1. 清理 ESC 监听（在移除 DOM 之前）
         if (_viewEl && _viewEl._escHandler) {
             document.removeEventListener("keydown", _viewEl._escHandler);
         }
 
-        // 2. 播放关闭动画，动画结束后再清理 DOM
         if (_viewEl) {
             _viewEl.style.animation = "git-rev-slide-out 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards";
             var leftWrapper = document.getElementById("git-rev-left");
@@ -277,11 +286,9 @@
     }
 
     function _doClose(viewEl) {
-        // 3. 移除修订面板
         if (viewEl && viewEl.parentNode) viewEl.parentNode.removeChild(viewEl);
         if (viewEl === _viewEl) _viewEl = null;
 
-        // 4. 把 wrapper 的子元素移回 content
         var leftWrapper = document.getElementById("git-rev-left");
         var contentEl = document.querySelector("content");
         if (leftWrapper && contentEl) {
@@ -291,24 +298,16 @@
             leftWrapper.parentNode.removeChild(leftWrapper);
         }
 
-        // 5. 恢复 content 样式
         if (contentEl) {
             contentEl.style.display = "";
             contentEl.style.flexDirection = "";
             contentEl.style.overflow = "";
         }
 
-        // 6. 清理克隆的主题样式
+        // 清理克隆的主题样式
         var clonedStyle = document.getElementById("git-rev-cloned-styles");
         if (clonedStyle && clonedStyle.parentNode) clonedStyle.parentNode.removeChild(clonedStyle);
 
-        // 7. #write 完全没有被修改过，无需恢复
-
-        // 6. 清理克隆的主题样式
-        var clonedStyle = document.getElementById("git-rev-cloned-styles");
-        if (clonedStyle && clonedStyle.parentNode) clonedStyle.parentNode.removeChild(clonedStyle);
-
-        // 7. 重置模块级状态
         _currentHash = "";
         _currentFilePath = "";
     }
@@ -320,7 +319,7 @@
     // ===================================================================
 
     function restoreFile(hash, filePath) {
-        if (_restoring) return;  // 防双击并发
+        if (_restoring) return;
         var repoPath = _store.state.repoPath;
         var rp = _getRelativePath(filePath || _store.state.currentFilePath);
         if (!rp) { window.BetterTypora.toast("无法确定文件路径", 3000); return; }
@@ -329,23 +328,17 @@
         _git.checkoutFile(repoPath, hash, rp).then(function (result) {
             _restoring = false;
             if (result.success) {
-                // 在 close() 之前保存路径，防止 DOM 清理影响状态
                 var restoredPath = _store.state.currentFilePath;
                 try { if (!restoredPath) restoredPath = BetterTypora.getCurrentFile(); } catch (e) {}
 
                 close();
                 window.BetterTypora.toast("已恢复到版本 " + hash.substring(0, 7), 2000);
 
-                // 从磁盘读取恢复后的内容，重新加载到编辑器
-                // File.getContent(path) 从磁盘读取 → File.reloadContent(content, opts) 写入编辑器
-                // encoding 参数省略（让 Typora 自动检测），避免 session-restore 场景下 fileEncode 为 undefined
                 if (restoredPath) {
                     try {
                         File.getContent(restoredPath).then(function (content) {
                             if (typeof File.reloadContent === "function") {
                                 File.reloadContent(content, { fromDiskChange: true });
-                                // 标记文档为干净（与 Typora 自己的文件监听器行为一致）
-                                // 防御：非 macOS 平台 NSChangeAutoSaved 可能为 undefined
                                 if (typeof File.updateChangeCount === "function" &&
                                     File.ChangeType != null &&
                                     File.ChangeType.NSChangeAutoSaved != null) {
@@ -390,13 +383,13 @@
     }
 
     // ===================================================================
-    // 同步滚动（左列 wrapper vs 修订面板内容区）
+    // 同步滚动
     // ===================================================================
 
     function _initSyncScroll() {
         _syncScrollActive = true;
-        var leftCol = document.getElementById("git-rev-left");       // 左列滚动容器
-        var revCol = document.getElementById("git-revision-view");   // 右列滚动容器
+        var leftCol = document.getElementById("git-rev-left");
+        var revCol = document.getElementById("git-revision-view");
         if (!leftCol || !revCol) return;
         leftCol.addEventListener("scroll", _sync(leftCol, revCol));
         revCol.addEventListener("scroll", _sync(revCol, leftCol));
@@ -412,6 +405,10 @@
             requestAnimationFrame(function () { _syncScrollActive = true; });
         };
     }
+
+    // ===================================================================
+    // 主题样式克隆
+    // ===================================================================
 
     function _cloneWriteStyles() {
         var exclude = [
@@ -432,8 +429,9 @@
             css += _collectCss(rules, exclude, excludePseudo);
         }
 
-        // 追加全局 MathJax 样式（非 #write 作用域的规则需显式注入）
-        css += _collectMathJaxStyles(sheets);
+        // MathJax/SVG 全局样式：简化为克隆 ALL 非 #write 作用域的样式规则，
+        // 避免遗漏关键样式导致数学公式显示异常
+        css += _collectGlobalMathStyles(sheets);
 
         var old = document.getElementById("git-rev-cloned-styles");
         if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -446,8 +444,11 @@
         }
     }
 
-    // 收集全局 MathJax 样式（不带 #write 前缀的 MJX 规则）
-    function _collectMathJaxStyles(sheets) {
+    /**
+     * 收集不包含 #write 前缀的全局 MathJax/MJX/SVG 样式规则。
+     * 简化为只收集 selectorText 含 mjx/MathJax 的规则，不做过度的正则过滤。
+     */
+    function _collectGlobalMathStyles(sheets) {
         var out = "";
         for (var i = 0; i < sheets.length; i++) {
             var rules;
@@ -456,18 +457,16 @@
             for (var j = 0; j < rules.length; j++) {
                 var rule = rules[j];
                 try {
-                    if (rule.type === 1) {
+                    if (rule.type === 1) { // CSSStyleRule
                         var sel = rule.selectorText;
-                        if (!sel) continue;
-                        // 收集 MathJax/MJX 相关的全局样式
-                        if (sel.indexOf("#write") === -1 &&
-                            /(mjx-container|MJX|MathJax|\.md-math\b|\.md-math-block|\.md-inline-math|math\b)/i.test(sel) &&
-                            !/mtext|merror/.test(sel)) {
-                            // 限制作用域到修订面板
+                        if (!sel || sel.indexOf("#write") !== -1) continue;
+                        // 收集 MathJax 注入的全局样式（mjx-container, MJXc-*, etc.）
+                        // 也包括 svg 相关（MathJax SVG 输出用的内联 svg）
+                        if (/\bmjx\b|MathJax|MJX|svg\b/i.test(sel)) {
                             out += "#git-rev-col " + sel + " { " + rule.style.cssText + " }\n";
                         }
-                    } else if (rule.type === 4 || rule.type === 12) {
-                        var inner = _collectMathJaxStyles([rule]);
+                    } else if (rule.type === 4 || rule.type === 12) { // @media / @supports
+                        var inner = _collectGlobalMathStyles([rule]);
                         if (inner) out += (rule.type === 4 ? "@media " : "@supports ") + (rule.conditionText || "") + " {\n" + inner + "}\n";
                     }
                 } catch (e) {}
@@ -482,7 +481,7 @@
             var rule = rules[j];
             try {
                 var t = rule.type;
-                if (t === 1) { // STYLE_RULE
+                if (t === 1) {
                     var sel = rule.selectorText;
                     if (!sel || sel.indexOf("#write") === -1) continue;
 
@@ -497,15 +496,14 @@
                     if (skip) continue;
 
                     var newSel = sel.replace(/#write\b/g, "#git-rev-col");
-                    var cssText = rule.style.cssText;
-                    out += newSel + " { " + cssText + " }\n";
-                } else if (t === 4) { // MEDIA_RULE
+                    out += newSel + " { " + rule.style.cssText + " }\n";
+                } else if (t === 4) {
                     var inner = _collectCss(rule.cssRules, exclude, excludePseudo);
                     if (inner) out += "@media " + (rule.conditionText || "") + " {\n" + inner + "}\n";
-                } else if (t === 12) { // SUPPORTS_RULE
+                } else if (t === 12) {
                     var inner = _collectCss(rule.cssRules, exclude, excludePseudo);
                     if (inner) out += "@supports " + (rule.conditionText || "") + " {\n" + inner + "}\n";
-                } else if (t === 3) { // IMPORT_RULE
+                } else if (t === 3) {
                     var importedSheet = rule.styleSheet;
                     if (importedSheet) {
                         try { out += _collectCss(importedSheet.cssRules, exclude, excludePseudo); } catch (e) {}
