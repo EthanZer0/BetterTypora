@@ -260,15 +260,17 @@ var tabStore = {
         if (!Array.isArray(slim) || slim.length === 0) return 0;
 
         var count = 0;
+        var removedCount = 0;
+        var keptSlim = [];
         for (var i = 0; i < slim.length; i++) {
             var s = slim[i];
-            // 校验文件是否还存在
+            // 校验文件是否还存在 — 静默跳过, 不弹提示 (文件是用户自己删的)
             if (!fs.existsSync(s.filePath)) {
                 logger.log("恢复时跳过不存在的文件: " + s.filePath);
-                window.BetterTypora.toast &&
-                    window.BetterTypora.toast("⚠️ 标签恢复: 文件已不存在 — " + path.basename(s.filePath), 800);
+                removedCount++;
                 continue;
             }
+            keptSlim.push(s);
             this.lastTabId++;
             var tab = {
                 id: "tab_" + this.lastTabId,
@@ -283,6 +285,13 @@ var tabStore = {
             this.tabs.push(tab);
             if (tab.isActive) this.activeTabId = tab.id;
             count++;
+        }
+
+        // 持久化剔除已不存在的标签 — 避免每次启动都重复跳过
+        if (removedCount > 0) {
+            api.setSetting("openTabs", JSON.stringify(keptSlim));
+            if (!keptSlim.length) api.setSetting("activeTabId", "");
+            logger.log("已从持久化清除 " + removedCount + " 个不存在的标签");
         }
 
         // 如果没有 active 标签, 默认激活第一个
