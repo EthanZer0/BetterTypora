@@ -1,11 +1,22 @@
-# Cache files
+# === 插件系统运行缓存 ===
 plugins/.cache/
 
-# OS files
+# === Typora 运行时产物 ===
+.trash/
+*.swp
+*.swo
+*~
+.typora-sync.lock
+.typora-sync.log
+
+# === 操作系统垃圾 ===
 .DS_Store
 Thumbs.db
 desktop.ini
+ehthumbs.db
 
-# IDE
+# === 编辑器/IDE 缓存 ===
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
 .vscode/
 .idea/
