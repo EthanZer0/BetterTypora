@@ -137,6 +137,12 @@ BetterTypora.getMountFolder()    // → string | null  打开的工作区根目�
 BetterTypora.openFile(path)      // → 切换到指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 
+// 文件事件 — 统一捕获 Typora 文件打开/切换/关闭/删除/改名
+BetterTypora.onFileEvent(type, fn)   // → 订阅事件, 返回取消函数
+BetterTypora.offFileEvent(unsubFn)   // → 取消订阅
+BetterTypora.onFileOpen(fn)          // → 兼容旧接口: fn(filePath), 文件打开完成时触发
+BetterTypora.offFileOpen(unsubFn)    // → 取消订阅
+
 // 核心服务 (高级)
 BetterTypora.events              // EventBus 实例
 BetterTypora.commands            // CommandRegistry 实例
@@ -172,6 +178,33 @@ BetterTypora.settings.get("plugin-id", "key", defaultValue)
 BetterTypora.settings.getAll("plugin-id")
 BetterTypora.settings.set("plugin-id", "key", value)
 ```
+
+### 文件事件（FileEventHub）
+
+统一捕获 Typora 的文件操作，覆盖**所有**打开/切换路径（侧边栏、快速打开、菜单、关联文件、拖拽、新建），基于 Typora 原生接口实现：
+
+| 事件 | 回调参数 | 触发时机 |
+|------|----------|----------|
+| `opening` | `{path, previousPath, isNew, untitled}` | 文件将被打开/切换（意图，可被取消） |
+| `opened` | `{path, previousPath, bundle}` | 文件**真正打开完成**（bundle 已就绪，含初始文档） |
+| `closing` | `{path, mountFolder}` | 窗口关闭前 |
+| `deleted` | `{path, originalPath}` | 当前文件被外部删除（bundle.filePath 已清空） |
+| `renamed` | `{path, previousPath}` | 文件重命名/另存为 |
+
+```js
+var unsub = BetterTypora.onFileEvent("opened", function (data) {
+    console.log("打开了:", data.path, "之前:", data.previousPath);
+});
+BetterTypora.offFileEvent(unsub);
+```
+
+**实现原理**（多数据源 + 兜底）：
+- hook `File.loadFile` → `opening`（渲染进程加载入口）
+- hook `File.onFileOpened` / `File.setDocumentState` → `opened`（加载完成 / 主进程状态推送）
+- 包装 `JSBridge.invoke` → `opening`(新建) / `closing`(关窗)
+- 轮询 `File.bundle`（500ms）→ `deleted` / `renamed` 兜底（bundle 引用变化=打开，仅路径变化=改名）
+
+**旧接口 `onFileOpen(fn)`**：`fn(filePath)`，等价于订阅 `opened` 且路径非空时触发（保持向后兼容）。
 
 ---
 

@@ -949,157 +949,206 @@
         };
 
         // ===================================================================
-        // onFileOpen / offFileOpen — 统一文件切换事件
+        // FileEventHub v2 — 统一文件事件系统
         // ===================================================================
-        // 所有插件共享同一个 openFile 猴子补丁和守护，不各自探测。
-        // 回调签名: function(filePath)  — filePath 为 string
+        // 基于 Typora 原生接口的多数据源捕获 (替代旧版 library.openFile 单点补丁):
+        //   A. hook File.loadFile         — 渲染进程加载入口 → opening
+        //   B. hook File.onFileOpened     — 渲染进程加载完成回调 → opened
+        //   C. hook File.setDocumentState — 主进程文档状态推送 (关联文件/拖拽/新建) → opened
+        //   D. 包装 JSBridge.invoke       — 主进程调用观测 (app.openFile / app.onCloseWin / switchToUntitled)
+        //   E. 轮询 File.bundle.filePath  — 兜底 (外部删除 deleted / 改名 renamed)
+        //
+        // 事件:
+        //   opening  {path, isNew, untitled}      — 文件将被打开/切换 (意图)
+        //   opened   {path, previousPath, bundle} — 文件真正打开完成 (bundle 已就绪)
+        //   closing  {path, mountFolder}          — 窗口关闭前
+        //   deleted  {path, originalPath}         — 当前文件被外部删除 (bundle.filePath 已清空)
+        //   renamed  {path, previousPath}         — 文件路径变更 (重命名/另存为)
+        //
+        // 兼容旧接口: onFileOpen(fn) / offFileOpen(unsub) — fn(filePath),
+        //            仅在 opened 且路径非空时触发
 
-        var _fileOpenCallbacks = [];       // [{id, fn}]
+        var _fileOpenCallbacks = [];       // [{id, fn}] 旧接口回调
         var _fileOpenNextId = 0;
-        var _fileOpenObj = null;
-        var _fileOpenMethod = null;
-        var _fileOpenOrig = null;
-        var _fileOpenGuardInterval = null;
+        var _fileEvents = {};              // type -> [fn]
+        var _lastOpenedPath = null;
+        var _lastOpenedTime = 0;
+        var _fileHooks = {};               // {loadFile, onFileOpened, setDocumentState} -> 原函数
+        var _jsBridgeWrapped = false;
+        var _fileHookGuard = null;
+        var _pollTimer = null;
+        var _lastBundlePath = null;
+        var _lastBundleObj = null;
+        var _pollBaselineReady = false;
 
-        /** 探测 Typora 的 library.openFile (3 层回退) */
-        function _btFindOpenFileFn() {
-            try {
-                if (typeof File !== "undefined" && File.editor && File.editor.library
-                    && typeof File.editor.library.openFile === "function") {
-                    return { obj: File.editor.library, method: "openFile" };
-                }
-            } catch (e) {}
-            try {
-                var keys = Object.keys(window);
-                for (var i = 0; i < keys.length; i++) {
-                    try {
-                        var o = window[keys[i]];
-                        if (o && o !== window && typeof o === "object"
-                            && o.library && typeof o.library.openFile === "function") {
-                            return { obj: o.library, method: "openFile" };
-                        }
-                    } catch (e) {}
-                }
-            } catch (e) {}
-            try {
-                var keys2 = Object.keys(window);
-                for (var j = 0; j < keys2.length; j++) {
-                    try {
-                        var root = window[keys2[j]];
-                        if (!root || root === window || typeof root !== "object") continue;
-                        var subKeys = Object.keys(root);
-                        for (var k = 0; k < subKeys.length; k++) {
-                            try {
-                                var child = root[subKeys[k]];
-                                if (child && typeof child === "object"
-                                    && child.library && typeof child.library.openFile === "function") {
-                                    return { obj: child.library, method: "openFile" };
-                                }
-                            } catch (e) {}
-                        }
-                    } catch (e) {}
-                }
-            } catch (e) {}
-            return null;
-        }
-
-        /** 安装 openFile 补丁 (幂等) */
-        function _btInstallOpenFilePatch() {
-            if (_fileOpenObj && _fileOpenMethod) return true;
-            var found = _btFindOpenFileFn();
-            if (!found) return false;
-            _fileOpenObj = found.obj;
-            _fileOpenMethod = found.method;
-            _fileOpenOrig = _fileOpenObj[_fileOpenMethod];
-            _fileOpenObj[_fileOpenMethod] = function (filePath) {
-                var result = _fileOpenOrig.apply(this, arguments);
-                if (filePath) {
-                    var fp = String(filePath);
-                    // 通知所有注册的回调
-                    var copy = _fileOpenCallbacks.slice();
-                    for (var c = 0; c < copy.length; c++) {
-                        try { copy[c].fn(fp); } catch (e) {}
+        /** 事件分发: type 事件 + opened 兼容旧 onFileOpen 回调 */
+        function _emitFileEvent(type, data) {
+            var list = _fileEvents[type];
+            if (list) {
+                var copy = list.slice();
+                for (var i = 0; i < copy.length; i++) {
+                    try { copy[i](data); } catch (e) {
+                        systemLogger.warn("file event '" + type + "' handler:", e);
                     }
                 }
-                return result;
+            }
+            if (type === "opened") {
+                var fp = data.path || null;
+                if (fp) {
+                    var copy2 = _fileOpenCallbacks.slice();
+                    for (var j = 0; j < copy2.length; j++) {
+                        try { copy2[j].fn(fp); } catch (e) {}
+                    }
+                }
+            }
+        }
+
+        /** opened 事件 (500ms 同路径去重, 防 setDocumentState 与 onFileOpened 双触发) */
+        function _emitOpened(path, previousPath) {
+            var now = Date.now();
+            if (path === _lastOpenedPath && now - _lastOpenedTime < 500) return;
+            _lastOpenedPath = path;
+            _lastOpenedTime = now;
+            var bundle = null;
+            try { if (typeof File !== "undefined" && File.bundle) bundle = File.bundle; } catch (e) {}
+            _emitFileEvent("opened", { path: path || null, previousPath: previousPath || null, bundle: bundle });
+        }
+
+        /** 安装 File hook (幂等), 返回 true 表示 3 个 hook 全部就位 */
+        function _btInstallFileHooks() {
+            if (typeof File === "undefined") return false;
+            var installed = 0;
+
+            if (!_fileHooks.loadFile && typeof File.loadFile === "function") {
+                var origLoad = File.loadFile;
+                _fileHooks.loadFile = origLoad;
+                File.loadFile = function (filePath) {
+                    var prev = null;
+                    try { prev = (File.bundle && File.bundle.filePath) || null; } catch (e) {}
+                    try { _emitFileEvent("opening", { path: filePath || null, previousPath: prev }); } catch (e) {}
+                    return origLoad.apply(this, arguments);
+                };
+                installed++;
+            }
+            if (!_fileHooks.onFileOpened && typeof File.onFileOpened === "function") {
+                var origOpened = File.onFileOpened;
+                _fileHooks.onFileOpened = origOpened;
+                File.onFileOpened = function () {
+                    var prev = _lastOpenedPath;
+                    var result = origOpened.apply(this, arguments);
+                    try { _emitOpened((File.bundle && File.bundle.filePath) || null, prev); } catch (e) {}
+                    return result;
+                };
+                installed++;
+            }
+            if (!_fileHooks.setDocumentState && typeof File.setDocumentState === "function") {
+                var origSetState = File.setDocumentState;
+                _fileHooks.setDocumentState = origSetState;
+                File.setDocumentState = function (state) {
+                    var prev = null;
+                    try { prev = (File.bundle && File.bundle.filePath) || null; } catch (e) {}
+                    var result = origSetState.apply(this, arguments);
+                    try { _emitOpened((File.bundle && File.bundle.filePath) || null, prev); } catch (e) {}
+                    return result;
+                };
+                installed++;
+            }
+            if (installed > 0) systemLogger.log("文件事件 hook 已安装 (" + installed + " 个)");
+            return installed === 3;
+        }
+
+        /** 包装 JSBridge.invoke — 观测主进程调用 (幂等) */
+        function _btWrapJSBridge() {
+            if (_jsBridgeWrapped) return true;
+            if (typeof JSBridge === "undefined" || typeof JSBridge.invoke !== "function") return false;
+            var origInvoke = JSBridge.invoke;
+            JSBridge.invoke = function (channel) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                try {
+                    if (channel === "app.openFile") {
+                        _emitFileEvent("opening", { path: null, isNew: true });
+                    } else if (channel === "document.switchToUntitled") {
+                        _emitFileEvent("opening", { path: null, isNew: true, untitled: true });
+                    } else if (channel === "app.onCloseWin") {
+                        var p = null, m = null;
+                        try { p = (File && File.bundle && File.bundle.filePath) || null; } catch (e) {}
+                        m = args[0] || null;
+                        _emitFileEvent("closing", { path: p, mountFolder: m });
+                    }
+                } catch (e) {}
+                return origInvoke.apply(this, arguments);
             };
-            systemLogger.log("已安装 openFile 拦截");
+            _jsBridgeWrapped = true;
+            systemLogger.log("已包装 JSBridge.invoke");
             return true;
         }
 
-        /** 卸载 openFile 补丁 */
-        function _btUninstallOpenFilePatch() {
-            if (_fileOpenObj && _fileOpenMethod && _fileOpenOrig) {
-                _fileOpenObj[_fileOpenMethod] = _fileOpenOrig;
-                _fileOpenObj = null;
-                _fileOpenMethod = null;
-                _fileOpenOrig = null;
-            }
-            if (_fileOpenGuardInterval) {
-                clearInterval(_fileOpenGuardInterval);
-                _fileOpenGuardInterval = null;
-            }
-        }
-
-        /** 启动 openFile 补丁守护 (每 1.5s 检查，被 Typora 覆盖则重新注入) */
-        function _btStartOpenFileGuard() {
-            if (_fileOpenGuardInterval) return;
-            _fileOpenGuardInterval = setInterval(function () {
-                if (!_fileOpenObj || !_fileOpenMethod || !_fileOpenOrig) {
-                    // 补丁丢失，尝试重装
-                    _btInstallOpenFilePatch();
-                    return;
-                }
-                // 检查补丁是否被覆盖
-                if (_fileOpenObj[_fileOpenMethod] !== _fileOpenOrig
-                    && !_isOurWrapper(_fileOpenObj[_fileOpenMethod])) {
-                    systemLogger.log("openFile 补丁被覆盖，重新注入");
-                    _fileOpenOrig = _fileOpenObj[_fileOpenMethod]; // 以当前函数为新的原始
-                    _fileOpenObj[_fileOpenMethod] = function (filePath) {
-                        var result = _fileOpenOrig.apply(this, arguments);
-                        if (filePath) {
-                            var fp = String(filePath);
-                            var copy = _fileOpenCallbacks.slice();
-                            for (var c = 0; c < copy.length; c++) {
-                                try { copy[c].fn(fp); } catch (e) {}
-                            }
+        /** bundle 轮询兜底 (500ms) — 捕获外部删除/改名等 hook 覆盖不到的路径
+         *  区分逻辑: 打开/切换会重建 bundle 对象 (引用变化) → opened
+         *           重命名/另存为只改 bundle.filePath (引用不变) → renamed
+         *           有路径 → 无路径 (引用变或不变) → deleted */
+        function _btStartBundlePoll() {
+            if (_pollTimer) return;
+            _pollTimer = setInterval(function () {
+                try {
+                    if (typeof File === "undefined" || !File.bundle) return;
+                    var p = File.bundle.filePath || null;
+                    if (!_pollBaselineReady) {
+                        _pollBaselineReady = true;
+                        _lastBundlePath = p;
+                        _lastBundleObj = File.bundle;
+                        return;
+                    }
+                    var prev = _lastBundlePath;
+                    var bundleChanged = File.bundle !== _lastBundleObj;
+                    _lastBundlePath = p;
+                    _lastBundleObj = File.bundle;
+                    if (p === prev) return;
+                    if (prev && !p) {
+                        var orig = File.bundle.originalPath || prev;
+                        _emitFileEvent("deleted", { path: null, originalPath: orig });
+                    } else if (!prev && p) {
+                        _emitOpened(p, null);
+                    } else if (prev && p) {
+                        if (bundleChanged) {
+                            // 打开/切换新文档
+                            _emitOpened(p, prev);
+                        } else {
+                            // 同一文档路径变更 (重命名/另存为)
+                            _emitFileEvent("renamed", { path: p, previousPath: prev });
                         }
-                        return result;
-                    };
-                }
-            }, 1500);
+                    }
+                } catch (e) {}
+            }, 500);
         }
 
-        /** 判断函数是否是我们的包装器 (通过 toString 特征检测) */
-        function _isOurWrapper(fn) {
-            if (typeof fn !== "function") return false;
-            var src = String(fn);
-            return src.indexOf("_fileOpenCallbacks") !== -1 && src.indexOf("_fileOpenOrig") !== -1;
+        /** 守护: 每 1s 检查 File/JSBridge 就绪并安装 (安装完成后自停) */
+        function _btStartFileHookGuard() {
+            if (_fileHookGuard) return;
+            _fileHookGuard = setInterval(function () {
+                try {
+                    if (typeof File === "undefined") return;
+                    _btInstallFileHooks();
+                    _btWrapJSBridge();
+                    _btStartBundlePoll();
+                    if (_fileHooks.loadFile && _fileHooks.onFileOpened
+                        && _fileHooks.setDocumentState && _jsBridgeWrapped) {
+                        clearInterval(_fileHookGuard);
+                        _fileHookGuard = null;
+                        systemLogger.log("文件事件系统就绪 ✅");
+                    }
+                } catch (e) {}
+            }, 1000);
         }
 
+        // ---- 公共接口 ----
+
+        /** onFileOpen(fn) — 兼容旧接口, fn(filePath), 仅在文件真正打开完成且有路径时触发 */
         var _btOnFileOpen = function (callback) {
             if (typeof callback !== "function") return null;
             var id = ++_fileOpenNextId;
             _fileOpenCallbacks.push({ id: id, fn: callback });
-
-            // 首个订阅者 → 安装补丁 + 启动守护
-            if (_fileOpenCallbacks.length === 1) {
-                if (_btInstallOpenFilePatch()) {
-                    _btStartOpenFileGuard();
-                } else {
-                    // 补丁探测失败，稍后重试
-                    var _retry = setInterval(function () {
-                        if (_btInstallOpenFilePatch()) {
-                            _btStartOpenFileGuard();
-                            clearInterval(_retry);
-                        }
-                    }, 1000);
-                    // 30s 后放弃
-                    setTimeout(function () { try { clearInterval(_retry); } catch (e) {} }, 30000);
-                }
-            }
-
-            // 返回取消订阅函数
+            _btStartFileHookGuard();
             return function () {
                 for (var i = 0; i < _fileOpenCallbacks.length; i++) {
                     if (_fileOpenCallbacks[i].id === id) {
@@ -1107,14 +1156,32 @@
                         break;
                     }
                 }
-                // 无订阅者 → 卸载补丁 + 停止守护
-                if (_fileOpenCallbacks.length === 0) {
-                    _btUninstallOpenFilePatch();
-                }
             };
         };
 
         var _btOffFileOpen = function (unsubFn) {
+            if (typeof unsubFn === "function") unsubFn();
+        };
+
+        /** onFileEvent(type, fn) — 通用文件事件订阅, 返回取消订阅函数 */
+        var _btOnFileEvent = function (type, callback) {
+            if (!type || typeof callback !== "function") return null;
+            if (!_fileEvents[type]) _fileEvents[type] = [];
+            _fileEvents[type].push(callback);
+            _btStartFileHookGuard();
+            return function () {
+                var list = _fileEvents[type];
+                if (!list) return;
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i] === callback) {
+                        list.splice(i, 1);
+                        break;
+                    }
+                }
+            };
+        };
+
+        var _btOffFileEvent = function (unsubFn) {
             if (typeof unsubFn === "function") unsubFn();
         };
 
@@ -1218,6 +1285,11 @@
             // 文件切换事件 (BetterTypora.onFileOpen/offFileOpen)
             onFileOpen: _btOnFileOpen,
             offFileOpen: _btOffFileOpen,
+
+            // 通用文件事件 (BetterTypora.onFileEvent(type, fn)/offFileEvent)
+            // type: "opening" | "opened" | "closing" | "deleted" | "renamed"
+            onFileEvent: _btOnFileEvent,
+            offFileEvent: _btOffFileEvent,
 
             // 定时器组 (BetterTypora.createTimerGroup())
             createTimerGroup: _btCreateTimerGroup,
