@@ -308,9 +308,29 @@ function normalizePath(filePath) {
     });
 }
 
-/** 检测文档是否有未保存修改 */
+/** 检测文档是否有未保存修改
+ *  保护: 无文档或文件不存在时不算脏 — 文件被外部删除后 Typora 会把
+ *  bundle.hasModified 标记为 truthy (防数据丢失), 但标签即将被清理,
+ *  此时显示脏状态没有意义, 还会污染下一个激活标签的显示 */
 function isDocumentDirty() {
+    var p = BetterTypora.getCurrentFile();
+    if (!p || !fs.existsSync(p)) return false;
     return BetterTypora.isDocumentEdited();
+}
+
+/** 重置 Typora 的"伪修改"状态 (文件被外部删除后 Typora 会把文档标记为已修改)
+ *  仅在被删标签删除前无真实修改时调用, 避免切换文档时弹"是否保存"框 */
+function clearFakeModifiedState() {
+    try {
+        if (typeof File !== "undefined") {
+            if (File.bundle) File.bundle.hasModified = false;
+            if (File.changeCounter && typeof File.changeCounter.reset === "function") {
+                File.changeCounter.reset();
+            }
+        }
+    } catch (e) {
+        logger.warn("clearFakeModifiedState:", e.message);
+    }
 }
 
 // ===================================================================
@@ -1013,6 +1033,11 @@ function startDeadTabWatcher() {
                 removed.push(t);
                 if (t.isActive) {
                     tabStore.cacheActiveState();
+                    // 被删文件若删除前无真实修改 → 重置 Typora 伪修改状态,
+                    // 否则切换文档时 Typora 会弹"是否保存更改"框 (文件已删, 提示无意义)
+                    if (!t.isDirty) {
+                        clearFakeModifiedState();
+                    }
                 }
                 tabStore.tabs.splice(i, 1);
                 logger.log("标签已自动清除 (文件不存在): " + t.fileName);
