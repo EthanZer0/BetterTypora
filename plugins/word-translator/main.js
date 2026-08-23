@@ -213,20 +213,21 @@ function ensureUI() {
 // ===================================================================
 // 显示 / 隐藏
 // ===================================================================
-function showButton(rect) {
+function showButton(rect, mouseX, mouseY) {
     ensureUI();
     state.selRect = rect;
     state.buttonVisible = true;
     state.translated = null;
     state.translatePromise = null;
 
-    // 定位: 选区右下外侧 (视口坐标)
-    var x = rect.right + 6;
-    var y = rect.bottom + 6;
+    // 定位: 锚定鼠标释放点 (光标附近), 右下方偏移
+    // 跨行选区时选区整体包围盒会被满行拉偏, 光标位置更符合直觉
+    var x = mouseX + 10;
+    var y = mouseY + 10;
     // 右侧空间不足 → 放左侧
-    if (x + 34 > window.innerWidth) x = rect.left - 40;
+    if (x + 34 > window.innerWidth) x = mouseX - 44;
     // 下方空间不足 → 放上方
-    if (y + 34 > window.innerHeight) y = rect.top - 40;
+    if (y + 34 > window.innerHeight) y = mouseY - 44;
 
     buttonEl.style.left = Math.round(x) + "px";
     buttonEl.style.top = Math.round(y) + "px";
@@ -373,7 +374,9 @@ function copyResult() {
 function onMouseUp(e) {
     // 点击插件 UI 内不处理
     if (isOurUI(e.target)) return;
-    // 等选区稳定再处理
+    // 记录鼠标释放位置 (浮钮锚点), 等选区稳定再处理
+    state.mouseX = e.clientX;
+    state.mouseY = e.clientY;
     setTimeout(processSelection, 15);
 }
 
@@ -395,7 +398,7 @@ function processSelection() {
         return;
     }
     state.selText = text;
-    showButton(rect);
+    showButton(rect, state.mouseX, state.mouseY);
 }
 
 function onKeyDown(e) {
