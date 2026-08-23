@@ -18,6 +18,8 @@ var path = reqnode("path");
 var _timers = null;
 // 文件切换事件取消订阅
 var _onFileOpenUnsub = null;
+// opened 事件取消订阅 (切换完成后清除旧标签脏状态)
+var _openedUnsub = null;
 
 // ===================================================================
 // TabDataStore — 纯数据层
@@ -243,6 +245,17 @@ var tabStore = {
         }
         api.setSetting("openTabs", JSON.stringify(slim));
         api.setSetting("activeTabId", this.activeTabId || "");
+    },
+
+    /**
+     * 启动窗口期: 清除恢复标签的激活态 (真实文档未确定前不显示高亮,
+     * 避免误导 — 激活状态等 Typora 初始文档确定后再由 handleDetectedDocument 设置)
+     */
+    clearActiveForStartup: function () {
+        for (var i = 0; i < this.tabs.length; i++) {
+            this.tabs[i].isActive = false;
+        }
+        this.activeTabId = null;
     },
 
     /**
@@ -886,23 +899,10 @@ function switchToTab(tabId) {
     var tab = tabStore.findById(tabId);
     if (!tab || tab.isActive) return;
 
-    // 检查当前文档是否脏
-    if (api.getSetting("confirmBeforeClose", true)) {
-        var active = tabStore.getActive();
-        if (active && active.isDirty) {
-            var confirmed = confirm(
-                "“" + active.fileName + "” 有未保存的修改。\n" +
-                "切换标签前是否保存？\n\n" +
-                "确定 = 保存后切换  |  取消 = 不切换"
-            );
-            if (confirmed) {
-                // 尝试触发 Typora 的保存
-                triggerSave();
-            } else {
-                return;
-            }
-        }
-    }
+    // 脏文档确认交给 Typora 原生机制 (tryLeaveDocument 的异步保存对话框):
+    // 不要用 confirm() 拦截 — 它是同步阻塞的, 会冻结事件循环,
+    // 导致自动保存等异步流程卡死 (inSavingProcess/_onFileSwitching 无法复位),
+    // 进而使后续所有标签的编辑与切换全部失效。
 
     // 缓存当前状态
     tabStore.cacheActiveState();
@@ -927,19 +927,7 @@ function closeTab(tabId) {
     var tab = tabStore.findById(tabId);
     if (!tab) return;
 
-    // 脏文档确认
-    if (tab.isDirty && api.getSetting("confirmBeforeClose", true)) {
-        var confirmed = confirm(
-            "“" + tab.fileName + "” 有未保存的修改。\n" +
-            "关闭标签前是否保存？\n\n" +
-            "确定 = 保存后关闭  |  取消 = 不关闭"
-        );
-        if (confirmed) {
-            triggerSave();
-        } else {
-            return;
-        }
-    }
+    // 脏文档确认同样交给 Typora 原生机制 (理由同 switchToTab)
 
     var wasActive = tab.isActive;
     var nextTabId = tabStore.removeTab(tabId);
@@ -956,13 +944,6 @@ function closeTab(tabId) {
     } else {
         tabBarUI.render();
     }
-}
-
-/**
- * 触发 Typora 的保存操作
- */
-function triggerSave() {
-    BetterTypora.saveFile();
 }
 
 // ===================================================================
@@ -1083,6 +1064,109 @@ function stopDeadTabWatcher() {
     }
 }
 
+/** 启动期等待初始文档的监听/定时器 (enable 时创建, disable 时清理) */
+var _startupUnsub = null;
+var _startupFallbackTimer = null;
+var _startupBundlePoll = null;
+
+/** 处理检测到的当前文档路径 (加入标签/激活) */
+function handleDetectedDocument(currentPath) {
+    if (!currentPath || !/\.(md|markdown|mdown|txt|textile|rst|org)$/i.test(currentPath)) {
+        if (tabStore.tabs.length === 0) {
+            logger.log("未检测到已打开的文档, 等待用户打开文件...");
+        }
+        return;
+    }
+    var existing = tabStore.findByPath(currentPath);
+    if (!existing) {
+        logger.log("检测到当前文档: " + path.basename(currentPath));
+        tabStore.addOrActivate(currentPath);
+        tabBarUI.render();
+    } else if (!existing.isActive) {
+        // 存在但未激活 — 更新激活状态
+        tabStore.activateTab(existing.id);
+        tabBarUI.render();
+    }
+}
+
+/** 选择要恢复的最后活跃标签 (active 优先, 否则 lastAccessed 最新) */
+function findBestTab() {
+    var bestTab = null;
+    for (var k = 0; k < tabStore.tabs.length; k++) {
+        var t = tabStore.tabs[k];
+        if (fs.existsSync(t.filePath)) {
+            if (t.isActive) return t;
+            if (!bestTab || t.lastAccessed > bestTab.lastAccessed) {
+                bestTab = t;
+            }
+        }
+    }
+    return bestTab;
+}
+
+/** 取消启动期等待 (opened 监听 + bundle 轮询 + 兜底定时器) */
+function cancelStartupWait() {
+    if (_startupUnsub) {
+        BetterTypora.offFileEvent(_startupUnsub);
+        _startupUnsub = null;
+    }
+    if (_startupBundlePoll) {
+        _timers.clearInterval(_startupBundlePoll);
+        _startupBundlePoll = null;
+    }
+    if (_startupFallbackTimer) {
+        _timers.clearTimeout(_startupFallbackTimer);
+        _startupFallbackTimer = null;
+    }
+}
+
+/**
+ * 等待 Typora 初始文档确定, 超时才兜底恢复缓存标签。
+ * 场景: 资源管理器/命令行打开文件时, Typora 的初始文档推送晚于插件启用,
+ * 若此时立即打开"最后活跃标签"会造成 先切缓存标签 → 再切回实际文件 的闪烁。
+ *
+ * 数据源 (先到先得):
+ *   A. bundle 轮询 (300ms) — bundle.filePath 就绪即处理, 最快路径
+ *   B. opened 事件 — FileEventHub 的文档加载完成信号 (兜底)
+ *   C. 5s 兜底定时器 — 全新空白启动时恢复最后活跃缓存标签
+ */
+function waitForStartupDocument(hasRestoredTabs) {
+    var handled = false;
+    var finish = function (path) {
+        if (handled) return;
+        handled = true;
+        cancelStartupWait();
+        if (path) handleDetectedDocument(path);
+    };
+
+    // A. bundle 轮询加速: Typora 文档已加载 (bundle.filePath 非空) 即处理,
+    //    不必等 opened 事件链路 (hook → 分发可能滞后于 bundle 就绪)
+    _startupBundlePoll = _timers.setInterval(function () {
+        var p = null;
+        try { p = BetterTypora.getCurrentFile(); } catch (e) {}
+        if (p && fs.existsSync(p)) finish(p);
+    }, 300);
+
+    // B. opened 事件兜底 (若 bundle 轮询先命中会自动取消)
+    _startupUnsub = BetterTypora.onFileEvent("opened", function (data) {
+        finish(data && data.path);
+    });
+
+    // C. 兜底: 5 秒内无任何初始文档 (全新空白启动) → 打开最后活跃标签
+    if (hasRestoredTabs && tabStore.tabs.length > 0) {
+        _startupFallbackTimer = _timers.setTimeout(function () {
+            if (handled) return;
+            finish(null);
+            var bestTab = findBestTab();
+            if (bestTab) {
+                logger.log("恢复打开文件: " + bestTab.fileName + " (" + bestTab.filePath + ")");
+                // 关键: 实际打开文件 — 触发 openFile 拦截器, 通知所有订阅者
+                BetterTypora.openFile(bestTab.filePath);
+            }
+        }, 5000);
+    }
+}
+
 /**
  * 自动检测 Typora 当前已打开的文档
  * 场景: Typora 启动时从上次会话恢复文件, 或用户通过命令行打开文件
@@ -1140,43 +1224,15 @@ function autoDetectCurrentDocument(hasRestoredTabs) {
         } catch (e) { /* skip */ }
     }
 
-    // 方法 4: 恢复标签兜底 — 自动打开最后一个活跃标签
-    if (!currentPath && hasRestoredTabs && tabStore.tabs.length > 0) {
-        var bestTab = null;
-        // 优先选标记为 active 的; 否则选 lastAccessed 最新的
-        for (var k = 0; k < tabStore.tabs.length; k++) {
-            var t = tabStore.tabs[k];
-            if (fs.existsSync(t.filePath)) {
-                if (t.isActive) { bestTab = t; break; }
-                if (!bestTab || t.lastAccessed > bestTab.lastAccessed) {
-                    bestTab = t;
-                }
-            }
-        }
-        if (bestTab) {
-            currentPath = bestTab.filePath;
-            logger.log("恢复打开文件: " + bestTab.fileName + " (" + bestTab.filePath + ")");
-            // 关键: 实际打开文件 — 触发 openFile 拦截器, 通知所有订阅者
-            BetterTypora.openFile(currentPath);
-        }
+    // 快速路径: 已检测到当前文档 → 直接处理
+    if (currentPath) {
+        handleDetectedDocument(currentPath);
+        return;
     }
 
-    // 如果找到了路径且尚未在标签列表中
-    if (currentPath && /\.(md|markdown|mdown|txt|textile|rst|org)$/i.test(currentPath)) {
-        var existing = tabStore.findByPath(currentPath);
-        if (!existing) {
-            logger.log("检测到当前文档: " + path.basename(currentPath));
-            tabStore.addOrActivate(currentPath);
-            tabBarUI.render();
-        } else if (!existing.isActive) {
-            // 存在但未激活 — 更新激活状态
-            tabStore.activateTab(existing.id);
-            tabBarUI.render();
-        }
-    } else if (tabStore.tabs.length === 0) {
-        // 完全检测不到文件 — 显示空状态, 提示用户
-        logger.log("未检测到已打开的文档, 等待用户打开文件...");
-    }
+    // 未检测到: Typora 初始文档可能还在加载 (资源管理器/命令行打开场景)
+    // → 等待 opened 事件确定真实文档, 超时才兜底恢复缓存标签
+    waitForStartupDocument(hasRestoredTabs);
 }
 
 // ===================================================================
@@ -1197,6 +1253,11 @@ module.exports = {
         if (restoreOnStartup) {
             restoredCount = tabStore.restore();
             logger.log("已恢复 " + restoredCount + " 个标签");
+            // 启动窗口期: 恢复的标签暂不显示激活 (真实文档未确定,
+            // 资源管理器/命令行打开文件时避免"缓存标签先高亮"的误导)
+            if (restoredCount > 0) {
+                tabStore.clearActiveForStartup();
+            }
         }
 
         // 2. 注入标签栏
@@ -1209,10 +1270,25 @@ module.exports = {
         // 3b. 安装新建文件拦截器 (Ctrl+N, 侧边栏新建按钮)
         newFileInterceptor.install();
 
+        // 3c. 切换完成后清除旧标签的脏状态
+        //     opened 事件触发时 previousPath 指向的文档已完成 保存/放弃
+        //     (Typora 的 tryLeaveDocument 在切换前处理), 旧标签应显示干净
+        _openedUnsub = BetterTypora.onFileEvent("opened", function (data) {
+            if (data && data.previousPath) {
+                var prevTab = tabStore.findByPath(data.previousPath);
+                if (prevTab && prevTab.isDirty) {
+                    prevTab.isDirty = false;
+                    tabBarUI.render();
+                    tabStore.persist();
+                }
+            }
+        });
+
         // 4. 自动检测当前已打开的文档 (Typora 可能从上次会话恢复)
+        //    300ms 足够本插件初始化; 初始文档就绪后由 bundle 轮询/opened 事件快速接管
         _timers.setTimeout(function () {
             autoDetectCurrentDocument(restoredCount > 0);
-        }, 1500);
+        }, 300);
 
         // 5. 注册命令
         api.registerCommand("next-tab", function () {
@@ -1276,6 +1352,13 @@ module.exports = {
             _timers = null;
         }
         _onFileOpenUnsub = null;
+        if (_openedUnsub) {
+            BetterTypora.offFileEvent(_openedUnsub);
+            _openedUnsub = null;
+        }
+
+        // 取消启动期等待 (opened 监听 + 兜底定时器)
+        cancelStartupWait();
 
         // 停止拦截器
         interceptor.uninstall();
