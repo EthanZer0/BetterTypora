@@ -590,6 +590,9 @@
             // 文件切换事件
             onFileOpen: window.BetterTypora.onFileOpen,
             offFileOpen: window.BetterTypora.offFileOpen,
+            // 通用文件事件 (与 window.BetterTypora 保持一致)
+            onFileEvent: window.BetterTypora.onFileEvent,
+            offFileEvent: window.BetterTypora.offFileEvent,
             // 定时器组
             createTimerGroup: window.BetterTypora.createTimerGroup,
         };
