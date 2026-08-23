@@ -1346,6 +1346,26 @@ module.exports = {
     disable: function () {
         logger.log("正在停用标签页插件...");
 
+        // 以下清理均须在 _timers.close() 之前 — 内部会调用 _timers.clearInterval/clearTimeout
+        // 停止监听
+        var content = document.querySelector("content");
+        if (content) {
+            content.removeEventListener("scroll", onContentScroll);
+        }
+        stopDirtyPoll();
+        stopTitleObserver();
+        stopDeadTabWatcher();
+
+        // 取消启动期等待 (opened 监听 + bundle 轮询 + 兜底定时器)
+        cancelStartupWait();
+
+        // 停止拦截器
+        interceptor.uninstall();
+        newFileInterceptor.uninstall();
+
+        // 停止守护循环
+        tabBarUI.stopGuard();
+
         // 关闭定时器组 (自动清理所有定时器)
         if (_timers) {
             _timers.close();
@@ -1357,16 +1377,6 @@ module.exports = {
             _openedUnsub = null;
         }
 
-        // 取消启动期等待 (opened 监听 + 兜底定时器)
-        cancelStartupWait();
-
-        // 停止拦截器
-        interceptor.uninstall();
-        newFileInterceptor.uninstall();
-
-        // 停止守护循环
-        tabBarUI.stopGuard();
-
         // 移除标签栏 DOM
         if (tabBarUI.barEl && tabBarUI.barEl.parentNode) {
             tabBarUI.barEl.parentNode.removeChild(tabBarUI.barEl);
@@ -1377,15 +1387,6 @@ module.exports = {
         for (var i = 0; i < bars.length; i++) {
             if (bars[i].parentNode) bars[i].parentNode.removeChild(bars[i]);
         }
-
-        // 停止监听
-        var content = document.querySelector("content");
-        if (content) {
-            content.removeEventListener("scroll", onContentScroll);
-        }
-        stopDirtyPoll();
-        stopTitleObserver();
-        stopDeadTabWatcher();
 
         logger.log("标签页插件已停用");
     },
