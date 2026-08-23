@@ -417,7 +417,8 @@ function onDocMouseDown(e) {
 }
 
 function onScroll(e) {
-    // 选区随滚动失效 (滚出视口后选区自动清空) → 隐藏浮层
+    // 翻译面板内部滚动 (译文过长) 不隐藏 — 仅文档滚动 (选区失效) 才隐藏
+    if (e.target && isOurUI(e.target)) return;
     if (state.buttonVisible) {
         hideAll();
     }
