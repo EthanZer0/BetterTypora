@@ -1,6 +1,6 @@
 # BetterTypora — Typora 插件系统
 
-> 一个轻量级的 Typora 插件框架，通过注入渲染进程提供插件生命周期管理、事件总线、命令注册、设置持久化等核心能力。
+> 一个轻量级的 Typora 插件框架，通过在 `window.html` 注入渲染进程提供插件生命周期管理、事件总线、命令注册、设置持久化等核心能力。
 
 ---
 
@@ -8,9 +8,21 @@
 
 ### 安装
 
-BetterTypora 随 Typora 启动自动注入。无需用户操作。
+**1. 注入一行脚本**
 
-> 前提：`resources/app/` 已从 `app.asar` 解包，`launch.dist.js` 中包含注入代码。
+编辑 Typora 安装目录下的 `resources/window.html`，在文件末尾 `</body>` 之前添加：
+
+```html
+<script src="./plugins/plugin-loader.js"></script>
+```
+
+**2. 复制插件系统文件**
+
+将本仓库的 `plugins/` 目录复制到 Typora 的 `resources/` 下（即 `resources/plugins/plugin-loader.js`、`resources/plugins/<插件目录>/`）。
+
+**3. 重启 Typora** — 插件系统自动启动。
+
+> `window.html` 是 `resources/` 下的普通 HTML 文件，可以直接编辑。**不需要**解包 `app.asar`、**不需要**修改 `launch.dist.js`——正版 Typora 无需任何逆向操作即可使用。
 
 ### 你的第一个插件
 
@@ -76,47 +88,29 @@ module.exports = {
 ## 架构
 
 ```
-launch.dist.js ── 主进程入口
+window.html ── 渲染进程入口 (Typora 自带, 仅添加一行注入)
   │
-  ├─ /** Hook破解开始 */ … /** Hook破解结束 */  ← crack 脚本生成 (独立块)
-  │   ├─ license 破解 (crypto.publicDecrypt hook)
-  │   ├─ fs hook (app/ → app.bak/ 重定向)
-  │   └─ 激活接口拦截 (protocol.handle https)
-  │
-  ├─ /** BetterTypora开始 */ … /** BetterTypora结束 */  ← 插件系统 (独立块)
-  │   │
-  │   ├─ browser-window-created → executeJavaScript(plugin-loader.js)
-  │   ├─ require("plugins/*/main-process.js")  ← 自动扫描加载
-  │   └─ hook Menu.setApplicationMenu → 追加 "插件" 菜单
-  │
-  ├─ 渲染进程
-  │   plugin-loader.js (渲染进程, IIFE 单例)
-  │     │
-  │     ├── EventBus         — pub/sub 事件系统
-  │     ├── CommandRegistry  — 命名命令注册/执行
-  │     ├── SettingsManager  — 按插件持久化 JSON (.cache/<id>.settings.json)
-  │     ├── HotkeyManager    — 键盘快捷键绑定
-  │     ├── PluginManager    — 生命周期: scan → load → enable → disable → unload → reload
-  │     ├── PluginAPI        — 每个插件通过 require("bettertypora:api") 获取
-  │     └── window.BetterTypora — 全局 API
-  │
-  └─ 主进程 (插件专属)
-      plugins/*/main-process.js
-        │  由 launch.dist.js 在启动时自动扫描 require()
-        │  可访问 Electron Menu, BrowserWindow 等主进程 API
-        │  用于菜单拦截、原生窗口控制等渲染进程无法完成的事
+  └─ <script src="./plugins/plugin-loader.js">   ← BetterTypora 唯一注入点
+       │
+       ├── EventBus          — pub/sub 事件系统
+       ├── CommandRegistry   — 命名命令注册/执行
+       ├── SettingsManager   — 按插件持久化 JSON (.cache/<id>.settings.json)
+       ├── HotkeyManager     — 键盘快捷键绑定
+       ├── PluginManager     — 生命周期: scan → load → enable → disable → unload → reload
+       ├── PluginAPI         — 每个插件通过 require("bettertypora:api") 获取
+       └── window.BetterTypora — 全局 API
 ```
 
 ### 关键设计决策
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| 插件目录 | `resources/plugins/` | 避开 `resources/app/` 的 fs hook 正则重定向 |
-| 注入方式 | `window.html` `<script defer>` | 通过 `<script>` 标签自然加载 `plugin-loader.js`，比 `executeJavaScript` 更早到达渲染进程 |
+| 注入点 | `window.html` 末尾一行 `<script>` | window.html 是 resources/ 下的明文文件，无需解包 app.asar、无需修改 launch.dist.js，正版 Typora 直接可用 |
+| 插件目录 | `resources/plugins/` | 独立于 Typora 本体文件，升级 Typora 时插件及其数据不受影响 |
 | API 传递 | `require("bettertypora:api")` | 虚拟模块注入，干净无全局变量污染 |
-| 加载时机 | `setTimeout(fn, 0)` | `frame.js` 是 `defer`，推迟一 tick 确保 Typora 初始化完毕 |
+| 加载时机 | body 末尾同步执行 + `setTimeout(fn, 0)` | `frame.js` 是 `defer`，注入脚本在解析时先执行；插件加载推迟一 tick，确保 Typora 初始化完毕 |
 | 菜单注入 | 持续 500ms 守护 | `frame.js` 可能随时重建 `innerHTML`，持续守护确保菜单不丢失 |
-| 主进程扩展 | 自动扫描 `plugins/*/main-process.js` | 插件系统通过 `require()` 桥接主进程能力，无需修改 `launch.dist.js` |
+| 主进程依赖 | 无 | 纯渲染进程架构，不修改 launch.dist.js；原生菜单/窗口事件等主进程能力不可用 |
 
 ---
 
@@ -234,80 +228,16 @@ module.exports = {
 };
 ```
 
-### 主进程脚本：`main-process.js` <a id="main-process-script"></a>
+### 命令自动前缀补全
 
-插件可以通过 `main-process.js` 在 Electron 主进程中执行代码，访问菜单拦截、原生窗口控制等渲染进程无法触及的 API。
-
-**发现规则**：`launch.dist.js` 启动时自动扫描 `resources/plugins/*/main-process.js`，存在则 `require()` 执行。无需修改 `launch.dist.js` 本身。
-
-**加载时机**：同步加载，在 `<script>` 片段中位于 `setApplicationMenu` hook 之前、渲染进程注入之前。确保先于任何菜单构建完成。
-
-**设计原则**：
-
-| 原则 | 说明 |
-|------|------|
-| **独立可移除** | `main-process.js` 是插件的专属文件；删除插件目录即可彻底清空该功能，`launch.dist.js` 无需回退 |
-| **自包含** | 每个 `main-process.js` 是一个独立 IIFE，不导出任何东西，通过 hook Electron API 生效 |
-| **不写 `launch.dist.js`** | `launch.dist.js` 只保留通用的 BetterTypora 注入逻辑（插件系统加载、"插件"菜单），绝不在其中硬编码任何具体插件的功能 |
-| **防御性编程** | `main-process.js` 运行在 `try/catch` 包裹中，加载失败不影响其他插件和 Typora 启动 |
-
-**适用场景**：
-
-- 拦截 Electron 原生菜单行为（如 `buildFromTemplate` 中 `role: "new"` → 当前窗口新建标签）
-- 拦截原生窗口创建事件（如 `browser-window-created`）
-- 注册自定义协议（`protocol.handle`）
-- 主进程级别的 IPC 监听
-
-**不适用场景**：
-
-- DOM 操作、CSS 注入 → 渲染进程 `main.js` + `style.css`
-- 快捷键绑定、命令注册 → 渲染进程 `api.registerCommand()` / `manifest.json` `hotkeys`
-- 设置持久化 → 渲染进程 `api.getSetting()` / `api.setSetting()`
-
-**模板**：
-
-```js
-/**
- * <插件名> — 主进程脚本
- * 由 launch.dist.js 的插件主进程加载器自动扫描 require()
- *
- * 职责: <一句话描述>
- */
-(function () {
-    var electron = require("electron");
-    // ... hook Electron API ...
-
-    // 示例: Hook buildFromTemplate
-    var Menu = electron.Menu;
-    var _orig = Menu.buildFromTemplate;
-    Menu.buildFromTemplate = function (template) {
-        // 深拷贝 template (纯 JS 对象, 可安全修改)
-        // 修改副本 → 传给原始方法
-        return _orig.call(this, modifiedTemplate);
-    };
-})();
-```
-
-**关键教训 — 为什么是 `buildFromTemplate` 阶段拦截而不是 `setApplicationMenu` 阶段**：
-
-`Menu.buildFromTemplate(template)` 接收的是纯 JS 对象数组，尚未与 C++ 层绑定。此时 `delete item.role` 是安全的，因为 `MenuItem` 构造函数还未执行，`role: "new"` 的原生 IPC 行为尚未绑定。
-
-而在 `Menu.setApplicationMenu` 阶段，`MenuItem` 实例已经完成 C++ 绑定——即使修改属性，OS 级原生行为已经不可撤销。这个顺序规则适用于所有 Electron 菜单拦截场景。
-
-**关键教训 — 命令自动前缀补全**：
-
-`api.registerCommand("hello")` 注册时自动加插件前缀 → 实际 ID 为 `my-plugin:hello`。但在 `main-process.js` 或其他跨进程场景通过 `executeJavaScript` 调用时，无需手动拼接前缀——`CommandRegistry.execute()` 支持短名自动匹配：
+`api.registerCommand("hello")` 注册时自动加插件前缀 → 实际 ID 为 `my-plugin:hello`。`CommandRegistry.execute()` 支持短名自动匹配，跨插件调用时无需手动拼接前缀：
 
 ```js
 // ✅ 短名 — 自动后缀匹配, 找到 tabs:create-untitled
-win.webContents.executeJavaScript(
-    "window.BetterTypora.commands.execute('create-untitled')"
-);
+window.BetterTypora.commands.execute('create-untitled');
 
 // ✅ 完整名也支持
-win.webContents.executeJavaScript(
-    "window.BetterTypora.commands.execute('tabs:create-untitled')"
-);
+window.BetterTypora.commands.execute('tabs:create-untitled');
 ```
 
 **规则**：传入的 ID 不含 `:` 时，`execute()` 自动以 `:<id>` 为后缀扫描注册表。唯一定位到 1 个命令时直接执行；0 个或 >1 个时失败。完整 ID（含 `:`）不受影响，精确匹配。
@@ -384,19 +314,15 @@ win.webContents.executeJavaScript(
 ```
 resources/
 ├── plugins/                          # 插件系统根目录
-│   ├── plugin-loader.js              # 核心引导脚本 (~950 行)
+│   ├── plugin-loader.js              # 核心引导脚本
 │   ├── .cache/                       # 运行时设置缓存 (gitignore)
 │   │   └── <plugin-id>.settings.json
 │   └── <plugin-id>/                  # 每个插件独立目录
 │       ├── manifest.json
 │       ├── main.js
-│       ├── main-process.js            # 可选, 主进程脚本 (Electron Menu/BrowserWindow)
 │       └── style.css
-├── app/
-│   ├── launch.dist.js                # 主进程入口 (含注入代码)
-│   ├── atom.compiled.dist.jsc        # Typora 字节码核心 (不可修改)
-│   └── package.json
-└── window.html                       # 渲染进程 HTML (不修改)
+├── window.html                       # 渲染进程入口 (已添加一行注入脚本)
+└── app/                              # Typora 主进程 (无需修改)
 ```
 
 ---
@@ -405,11 +331,9 @@ resources/
 
 ### 开启 DevTools
 
-将 `resources/app/launch.dist.js` 第 13 行的 `if (false)` 改为 `if (true)`：
+使用 Typora 自带的开发者工具入口：菜单 **视图(View) → 切换开发者工具(Toggle Developer Tools)**。无需修改任何文件。
 
-```js
-if (true) win.webContents.openDevTools({ mode: "detach" });
-```
+（旧方案"修改 `launch.dist.js` 的 `if (false)`"已随架构迁移废弃。）
 
 ### Console 常用命令
 
@@ -422,7 +346,7 @@ BetterTypora.commands.execute("hello-world:greet")  // 手动触发命令
 
 ### 排查热键
 
-取消 `plugin-loader.js` 第 372 行注释：
+取消 `plugin-loader.js` 第 390 行注释：
 
 ```js
 console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
@@ -446,11 +370,14 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 | 无插件隔离 | 所有插件共享 JS 上下文，恶意插件可访问其他插件数据 |
 | 无热重载 CSS | JS 可通过 `reloadPlugin()` 重载，CSS 需重启 |
 | 启动速度 | 插件数量越多启动越慢 (每个插件同步 `require` 执行) |
-| Typora 升级 | `launch.dist.js` 可能在升级时被覆盖，需重新应用补丁 |
+| 无主进程能力 | 插件只运行在渲染进程；无法拦截 Typora 原生菜单/窗口事件（如原生"新建"菜单的 Ctrl+N），无法在退出前执行异步清理 |
+| Typora 升级 | 升级会覆盖 `resources/window.html`，需重新添加一行注入脚本；`resources/plugins/` 目录及插件数据不受影响 |
 
 ---
 
 ## 许可
+
+BetterTypora 是开源项目，可自由使用和修改。
 
 ---
 
@@ -520,8 +447,6 @@ var isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 - [ ] 所有 `var(--active-file-text-color, ...)` 回退链经过 `--text-color` 桥接
 - [ ] 所有硬编码颜色值为中性灰或 CSS 变量（避免 `rgba(0,0,0,N)` 和 `rgba(255,255,255,N)`）
 - [ ] 至少用 Claude Dark、Inkwell Dark、Latex Dark 三个主题做目视验证
-
-BetterTypora 是开源项目，可自由使用和修改。
 
 ---
 

@@ -1,12 +1,13 @@
 /**
  * Typora Plugin System — Core Bootloader
  * ========================================
- * 注入方式: 由 launch.dist.js 通过 executeJavaScript 注入到渲染进程
+ * 注入方式: 由 window.html 在 </body> 前以 <script src="./plugins/plugin-loader.js">
+ *           加载到渲染进程 (无需修改 launch.dist.js / app.asar)
  * 运行环境: Electron 渲染进程 (有 DOM, 有 reqnode)
  * 全局出口: window.BetterTypora
  *
  * 目录结构:
- *   resources/plugins/              ← 插件根目录 (避开 fs hook 正则)
+ *   resources/plugins/              ← 插件根目录
  *   resources/plugins/.cache/       ← 运行时配置缓存
  *   resources/plugins/<plugin-id>/  ← 每个插件一个子目录
  *     manifest.json
