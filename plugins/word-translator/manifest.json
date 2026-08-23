@@ -1,0 +1,15 @@
+{
+  "id": "word-translator",
+  "name": "划词翻译",
+  "version": "1.0.0",
+  "description": "划词翻译：选中文字后显示悬浮按钮，hover 展开翻译面板（类沙拉查词）",
+  "author": "BetterTypora",
+  "main": "main.js",
+  "style": "style.css",
+  "enabled": true,
+  "settings": {
+    "targetLang": "zh-CN",
+    "panelWidth": 340,
+    "maxTextLength": 500
+  }
+}
