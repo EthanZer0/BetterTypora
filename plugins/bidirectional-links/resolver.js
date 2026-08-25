@@ -115,19 +115,7 @@
             return pickClosest(basenameMatches, sourceFilePath);
         }
 
-        // --- Pass 4: 子串模糊匹配 ---
-        var lowerTargetBasename = lowerTarget.split("/").pop();
-        var fuzzyMatches = [];
-        for (var m = 0; m < allMdFiles.length; m++) {
-            var bn = basenameNoExt(allMdFiles[m]).toLowerCase();
-            if (bn.indexOf(lowerTargetBasename) >= 0 || lowerTargetBasename.indexOf(bn) >= 0) {
-                fuzzyMatches.push(allMdFiles[m]);
-            }
-        }
-        if (fuzzyMatches.length >= 1) {
-            return pickClosest(fuzzyMatches, sourceFilePath);
-        }
-
+        // 无精确匹配 → 断链 (不启用子串模糊匹配: [[前缀]] 会误配 前缀A.md 等)
         return null;
     }
 
@@ -285,19 +273,7 @@
             }
         }
 
-        // ---- 统一回退：子串模糊匹配（极少命中）----
-        var lowerTargetBasename = targetBase.toLowerCase();
-        var fuzzyMatches = [];
-        for (var c = 0; c < idx._bns.length; c++) {
-            if (idx._bns[c].indexOf(lowerTargetBasename) >= 0 ||
-                lowerTargetBasename.indexOf(idx._bns[c]) >= 0) {
-                fuzzyMatches.push(idx._raw[c]);
-            }
-        }
-        if (fuzzyMatches.length >= 1) {
-            return pickClosest(fuzzyMatches, sourceFilePath);
-        }
-
+        // 无精确匹配 → 断链 (不启用子串模糊匹配: [[前缀]] 会误配 前缀A.md 等)
         return null;
     }
 
