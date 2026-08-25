@@ -305,6 +305,40 @@ function extractWikiLinkAtPosition(textNode, offset) {
 }
 
 /**
+ * 从「拆分隐藏结构」重建完整链接。
+ * 两种结构:
+ *   别名: [hide: [[][hide: 标题|][alias: 别名][hide: ]]
+ *   普通: [hide: [[][title: 标题][hide: ]]
+ * 点击落在拆分 span 内时, 普通提取找不到 [[/]], 从兄弟 span 重建 raw。
+ */
+function extractWikiLinkFromSplit(textNode) {
+    try {
+        var el = textNode && textNode.parentElement;
+        if (!el || !el.classList) return null;
+        var raw = null;
+        if (el.classList.contains("bt-wl-alias")) {
+            // 别名链接: 标题从兄弟 hide span 提取 (去掉尾部管道)
+            var open = el.previousElementSibling;
+            var close = el.nextElementSibling;
+            if (!open || !close) return null;
+            var titlePart = (open.textContent || "").replace(/\|$/, "");
+            raw = "[[" + titlePart + "|" + (el.textContent || "") + "]]";
+        } else if (el.classList.contains("bt-wl-title")) {
+            // 普通链接: 标题即 span 自身文本
+            var t = (el.textContent || "").trim();
+            if (!t) return null;
+            raw = "[[" + t + "]]";
+        } else {
+            return null;
+        }
+        if (raw.length < 4) return null;
+        return { raw: raw, start: 0, end: raw.length };
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
  * Click 事件处理器（capture 阶段）
  */
 function handleWikiLinkClick(e) {
@@ -348,6 +382,9 @@ function handleWikiLinkClick(e) {
 
     // 从点击位置提取 [[...]] 文本
     var extracted = extractWikiLinkAtPosition(textNode, offset);
+    // 别名隐藏拆分了文本节点 ([[标题|别名]] → 别名独立成 span),
+    // 普通提取找不到完整链接 → 从拆分结构重建
+    if (!extracted) extracted = extractWikiLinkFromSplit(textNode);
     if (!extracted) return;
 
     // 跳过无效的（如空括号、只有闭合标记等）

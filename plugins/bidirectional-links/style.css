@@ -592,6 +592,18 @@
     display: none;
 }
 
+/* ===================================================================
+ * wikilink 别名隐藏 — [[标题|别名]] 只显示别名
+ * 拆分 span + font-size:0 隐藏 (callouts 同款机制, 文本保留可编辑);
+ * 编辑态 (md-focus) 恢复完整显示, 防误删
+ * =================================================================== */
+#write span.bt-wl-hide {
+    font-size: 0;
+}
+#write p.md-focus span.bt-wl-hide {
+    font-size: inherit;
+}
+
 /* 方括号：极淡，几乎不可见 */
 ::highlight(wikilink-bracket) {
     color: rgba(128, 128, 128, 0.18);

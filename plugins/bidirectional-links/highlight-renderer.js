@@ -246,8 +246,52 @@
             this._extractRanges(textNode);
         }
 
+        // 拆分隐藏的链接: 拆分后文本节点无 [[ 标记, TreeWalker 扫描不到,
+        // 且 Typora 重建会替换文本节点 — 改为每轮按 DOM 结构重新关联最新 span
+        this._collectSplitLinks();
+
         this._applyHighlights();
         this._processing = false;
+    };
+
+    /**
+     * 从 DOM 收集已拆分的链接 span, 重新注册高亮 Range。
+     * 两种结构:
+     *   别名: [hide: [[][hide: 标题|][alias: 别名][hide: ]]
+     *   普通: [hide: [[][title: 标题][hide: ]]
+     * 幂等: 每轮扫描都基于当前 DOM 重建, Typora 重建 span 后依然有效。
+     */
+    HighlightRenderer.prototype._collectSplitLinks = function () {
+        var self = this;
+        // 1. 别名链接: 标题从兄弟 hide span 提取
+        var aliases = document.querySelectorAll("#write span.bt-wl-alias");
+        for (var i = 0; i < aliases.length; i++) {
+            var as = aliases[i];
+            var open = as.previousElementSibling;
+            var title = open ? (open.textContent || "").replace(/\|$/, "") : "";
+            if (!title) continue;
+            this._registerSplitSpan(as, title);
+        }
+        // 2. 普通链接: 标题即 span 自身文本
+        var titles = document.querySelectorAll("#write span.bt-wl-title");
+        for (var j = 0; j < titles.length; j++) {
+            var ts = titles[j];
+            var t = (ts.textContent || "").trim();
+            if (!t) continue;
+            this._registerSplitSpan(ts, t);
+        }
+    };
+
+    /** 为一个拆分出的链接 span 解析并注册高亮 Range */
+    HighlightRenderer.prototype._registerSplitSpan = function (span, title) {
+        var currentFile = this._getCurrentFilePath();
+        var allMd = this._linkIndex ? this._linkIndex.allMdFiles : [];
+        var resolvedPath = this._resolver.resolveWithParentFallback
+            ? this._resolver.resolveWithParentFallback(title, currentFile, allMd, true, this._fs, this._path)
+            : this._resolver.resolve(title, currentFile, allMd, true);
+        var r = document.createRange();
+        r.selectNodeContents(span);
+        this._pushLink(r, resolvedPath ? "resolved" : "broken", title);
     };
 
     /** 注册全部 highlight 到 CSS Highlight Registry (含 hover 分组) */
@@ -288,6 +332,15 @@
         }
     }
 
+    /** 把文本节点包进 span 并返回 span (不改字符流) */
+    function _wrapTextNode(node, cls) {
+        var span = document.createElement("span");
+        span.className = cls;
+        node.parentNode.insertBefore(span, node);
+        span.appendChild(node);
+        return span;
+    }
+
     // ===================================================================
     // 从文本节点中提取 [[...]] Range
     // ===================================================================
@@ -297,114 +350,175 @@
         if (text.length < 4) return;   // 最少 "[[x]]"
 
         var regex = /!?\[\[([^\]]+)\]\]/g;
+        var matches = [];
         var match;
         while ((match = regex.exec(text)) !== null) {
             // 空括号跳过
             if (match[1].trim() === "") continue;
+            matches.push(match);
+        }
+        // 逆序处理: 别名拆分会分裂文本节点, 逆序保证前面链接的 offset 不漂移
+        for (var i = matches.length - 1; i >= 0; i--) {
+            this._processMatch(textNode, matches[i]);
+        }
+    };
 
-            var parsed = this._parser.parseOne(match[0]);
-            if (!parsed || (!parsed.target && !parsed.heading)) continue;
+    /** 处理单个 [[...]] 匹配: 拆分 (别名隐藏) + 高亮 */
+    HighlightRenderer.prototype._processMatch = function (textNode, match) {
+        var parsed = this._parser.parseOne(match[0]);
+        if (!parsed || (!parsed.target && !parsed.heading)) return;
 
-            // 验证链接是否可解析:
-            // - 有 target: 文件解析 (带父目录顶层兜底)
-            // - 纯 #heading 自引用: 标题存在于当前文件 → resolved, 否则断链
-            var currentFile = this._getCurrentFilePath();
-            var allMd = this._linkIndex ? this._linkIndex.allMdFiles : [];
-            var resolvedPath;
-            if (parsed.target) {
-                if (this._resolver.resolveWithParentFallback) {
-                    resolvedPath = this._resolver.resolveWithParentFallback(
-                        parsed.target, currentFile, allMd, true, this._fs, this._path
-                    );
-                } else {
-                    resolvedPath = this._resolver.resolve(parsed.target, currentFile, allMd, true);
-                }
-            } else if (parsed.heading) {
-                resolvedPath = this._headingExists(parsed.heading) ? currentFile : null;
+        // 验证链接是否可解析:
+        // - 有 target: 文件解析 (带父目录顶层兜底)
+        // - 纯 #heading 自引用: 标题存在于当前文件 → resolved, 否则断链
+        var currentFile = this._getCurrentFilePath();
+        var allMd = this._linkIndex ? this._linkIndex.allMdFiles : [];
+        var resolvedPath;
+        if (parsed.target) {
+            if (this._resolver.resolveWithParentFallback) {
+                resolvedPath = this._resolver.resolveWithParentFallback(
+                    parsed.target, currentFile, allMd, true, this._fs, this._path
+                );
+            } else {
+                resolvedPath = this._resolver.resolve(parsed.target, currentFile, allMd, true);
             }
-            // 气泡/元数据展示用目标 (纯 heading 引用显示 #标题)
-            var displayTarget = parsed.target || (parsed.heading ? "#" + parsed.heading : "");
+        } else if (parsed.heading) {
+            resolvedPath = this._headingExists(parsed.heading) ? currentFile : null;
+        }
+        // 气泡/元数据展示用目标 (纯 heading 引用显示 #标题)
+        var displayTarget = parsed.target || (parsed.heading ? "#" + parsed.heading : "");
 
-            try {
-                var fullMatch = match[0];
-                var innerText = match[1];
-                var innerStartInMatch = fullMatch.indexOf(innerText);
+        try {
+            var fullMatch = match[0];
+            var innerText = match[1];
+            var innerStartInMatch = fullMatch.indexOf(innerText);
 
-                var absStart = match.index;
-                var absInnerStart = absStart + innerStartInMatch;
-                var absInnerEnd = absInnerStart + innerText.length;
-                var absMatchEnd = absStart + fullMatch.length;
+            var absStart = match.index;
+            var absInnerStart = absStart + innerStartInMatch;
+            var absInnerEnd = absInnerStart + innerText.length;
+            var absMatchEnd = absStart + fullMatch.length;
 
-                // 左括号 Range（含可选的 ! 前缀）
-                if (absInnerStart > absStart) {
-                    var openRange = new Range();
-                    openRange.setStart(textNode, absStart);
-                    openRange.setEnd(textNode, absInnerStart);
-                    this._linkBrackets.push(openRange);
+            // ===== 别名隐藏 (非编辑态): [[标题|别名]] → 只显示别名 =====
+            // 拆分文本节点 (splitText, 字符流不变) + 包 span:
+            //   [[ / 目标+管道 / ]] → font-size:0 隐藏, 别名保留显示 + 高亮
+            // 编辑态 (md-focus) 不拆分, 走原逻辑显示完整链接。
+            if (parsed.alias && !this._isEditing(textNode)) {
+                var pipePos = innerText.lastIndexOf("|");
+                var aliasStartInInner = innerText.indexOf(parsed.alias, pipePos + 1);
+                if (aliasStartInInner >= 0) {
+                    var aliasAbsStart = absInnerStart + aliasStartInInner;
+                    // 从右往左拆分: textNode=前文, t5=[[, t4=目标+管道, t3=别名, t2=]], t1=后文
+                    var t1 = textNode.splitText(absMatchEnd);
+                    var t2 = textNode.splitText(absInnerEnd);
+                    var t3 = textNode.splitText(aliasAbsStart);
+                    var t4 = textNode.splitText(absInnerStart);
+                    var t5 = textNode.splitText(absStart);
+                    _wrapTextNode(t5, "bt-wl-hide");
+                    _wrapTextNode(t4, "bt-wl-hide");
+                    _wrapTextNode(t3, "bt-wl-alias");
+                    _wrapTextNode(t2, "bt-wl-hide");
+                    // 别名高亮不在此注册 — 统一由 _collectAliasSpans 在
+                    // 每轮扫描末尾按 DOM 重新关联 (Typora 重建后 span 保留,
+                    // 文本节点被替换, 此处创建的 Range 会失效)
+                    return;
                 }
+            }
 
-                // 内容 Range：有别名时，目标+管道→bracket，别名→resolved/broken
-                var innerRange = new Range();
-                innerRange.setStart(textNode, absInnerStart);
-                innerRange.setEnd(textNode, absInnerEnd);
+            // ===== 原逻辑 (编辑态 / 非别名 / 别名定位失败) =====
 
-                if (parsed.alias) {
-                    // innerText 形如 "Target|Alias"，找 alias 起始位置
-                    var pipePos = innerText.lastIndexOf("|");
-                    var aliasStartInInner = innerText.indexOf(parsed.alias, pipePos + 1);
-                    if (aliasStartInInner >= 0) {
-                        // 别名之前的部分（目标+管道+空白）→ bracket
-                        if (aliasStartInInner > 0) {
-                            var prefixRange = new Range();
-                            prefixRange.setStart(textNode, absInnerStart);
-                            prefixRange.setEnd(textNode, absInnerStart + aliasStartInInner);
-                            this._linkBrackets.push(prefixRange);
-                        }
-                        // 别名 → resolved/broken
-                        var aliasRange = new Range();
-                        aliasRange.setStart(textNode, absInnerStart + aliasStartInInner);
-                        aliasRange.setEnd(textNode, absInnerStart + aliasStartInInner + parsed.alias.length);
-                        if (resolvedPath) {
-                            this._pushLink(aliasRange, "resolved", displayTarget);
-                        } else {
-                            this._pushLink(aliasRange, "broken", displayTarget);
-                        }
-                        // alias 之后剩余（如 #heading 后缀）→ bracket
-                        var tailStartInInner = aliasStartInInner + parsed.alias.length;
-                        if (tailStartInInner < innerText.length) {
-                            var tailRange = new Range();
-                            tailRange.setStart(textNode, absInnerStart + tailStartInInner);
-                            tailRange.setEnd(textNode, absInnerEnd);
-                            this._linkBrackets.push(tailRange);
-                        }
+            // 左括号 Range（含可选的 ! 前缀）
+            if (absInnerStart > absStart) {
+                var openRange = new Range();
+                openRange.setStart(textNode, absStart);
+                openRange.setEnd(textNode, absInnerStart);
+                this._linkBrackets.push(openRange);
+            }
+
+            // 内容 Range：有别名时，目标+管道→bracket，别名→resolved/broken
+            var innerRange = new Range();
+            innerRange.setStart(textNode, absInnerStart);
+            innerRange.setEnd(textNode, absInnerEnd);
+
+            if (parsed.alias) {
+                // innerText 形如 "Target|Alias"，找 alias 起始位置
+                var pipePos2 = innerText.lastIndexOf("|");
+                var aliasStartInInner2 = innerText.indexOf(parsed.alias, pipePos2 + 1);
+                if (aliasStartInInner2 >= 0) {
+                    // 别名之前的部分（目标+管道+空白）→ bracket
+                    if (aliasStartInInner2 > 0) {
+                        var prefixRange = new Range();
+                        prefixRange.setStart(textNode, absInnerStart);
+                        prefixRange.setEnd(textNode, absInnerStart + aliasStartInInner2);
+                        this._linkBrackets.push(prefixRange);
+                    }
+                    // 别名 → resolved/broken
+                    var aliasRange2 = new Range();
+                    aliasRange2.setStart(textNode, absInnerStart + aliasStartInInner2);
+                    aliasRange2.setEnd(textNode, absInnerStart + aliasStartInInner2 + parsed.alias.length);
+                    if (resolvedPath) {
+                        this._pushLink(aliasRange2, "resolved", displayTarget);
                     } else {
-                        // 回退：找不到 alias 时整个 content 走原逻辑
-                        if (resolvedPath) {
-                            this._pushLink(innerRange, "resolved", displayTarget);
-                        } else {
-                            this._pushLink(innerRange, "broken", displayTarget);
-                        }
+                        this._pushLink(aliasRange2, "broken", displayTarget);
+                    }
+                    // alias 之后剩余（如 #heading 后缀）→ bracket
+                    var tailStartInInner = aliasStartInInner2 + parsed.alias.length;
+                    if (tailStartInInner < innerText.length) {
+                        var tailRange = new Range();
+                        tailRange.setStart(textNode, absInnerStart + tailStartInInner);
+                        tailRange.setEnd(textNode, absInnerEnd);
+                        this._linkBrackets.push(tailRange);
                     }
                 } else {
-                    // 无别名，整个内容走原逻辑
+                    // 回退：找不到 alias 时整个 content 走原逻辑
                     if (resolvedPath) {
                         this._pushLink(innerRange, "resolved", displayTarget);
                     } else {
                         this._pushLink(innerRange, "broken", displayTarget);
                     }
                 }
-
-                // 右括号 Range
-                if (absMatchEnd > absInnerEnd) {
-                    var closeRange = new Range();
-                    closeRange.setStart(textNode, absInnerEnd);
-                    closeRange.setEnd(textNode, absMatchEnd);
-                    this._linkBrackets.push(closeRange);
+            } else {
+                // 无别名: 非编辑态拆分 [[ / 标题 / ]] — 括号隐藏,
+                // 标题包 bt-wl-title span, 由 _collectSplitLinks 按 DOM 高亮
+                if (!this._isEditing(textNode)) {
+                    var t1b = textNode.splitText(absMatchEnd);
+                    var t2b = textNode.splitText(absInnerEnd);
+                    var t3b = textNode.splitText(absInnerStart);
+                    var t4b = textNode.splitText(absStart);
+                    _wrapTextNode(t4b, "bt-wl-hide");   // [[
+                    _wrapTextNode(t3b, "bt-wl-title");  // 标题
+                    _wrapTextNode(t2b, "bt-wl-hide");   // ]]
+                    return;
                 }
-            } catch (e) {
-                // Range 创建失败（极罕见），跳过
+                // 编辑态: 完整显示, 原逻辑高亮
+                if (resolvedPath) {
+                    this._pushLink(innerRange, "resolved", displayTarget);
+                } else {
+                    this._pushLink(innerRange, "broken", displayTarget);
+                }
             }
+
+            // 右括号 Range
+            if (absMatchEnd > absInnerEnd) {
+                var closeRange = new Range();
+                closeRange.setStart(textNode, absInnerEnd);
+                closeRange.setEnd(textNode, absMatchEnd);
+                this._linkBrackets.push(closeRange);
+            }
+        } catch (e) {
+            // Range 创建失败（极罕见），跳过
         }
+    };
+
+    /** 文本节点所在段落是否处于编辑态 (Typora 的 md-focus) */
+    HighlightRenderer.prototype._isEditing = function (textNode) {
+        try {
+            var el = textNode.parentElement;
+            while (el && el !== document.body) {
+                if (el.classList && el.classList.contains("md-focus")) return true;
+                el = el.parentElement;
+            }
+        } catch (e) {}
+        return false;
     };
 
     // ===================================================================
@@ -474,6 +588,11 @@
             var lr = links[i];
             var r = lr.range;
             if (r.startContainer === node && off >= r.startOffset && off <= r.endOffset) {
+                return lr;
+            }
+            // 元素级 Range (别名 span): 命中的文本节点在 span 内即可
+            if (r.startContainer && r.startContainer.nodeType === 1 &&
+                node.nodeType === 3 && r.startContainer.contains(node)) {
                 return lr;
             }
         }
