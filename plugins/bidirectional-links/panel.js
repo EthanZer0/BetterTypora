@@ -26,6 +26,7 @@
         this._guardInterval = null;
         this._pathPollInterval = null; // 面板打开时快速轮询当前文件路径
         this._snippetCache = {};  // sourcePath → fileContent
+        this._themeUnsub = null;  // BetterTypora.theme.onChange 解绑函数
     }
 
     var MAX_SNIPPETS_PER_SOURCE = 3;
@@ -34,6 +35,7 @@
      * 注入 tab 按钮和内容面板到侧边栏
      */
     BacklinksPanel.prototype.inject = function () {
+        var self = this;
         var sidebar = document.getElementById("typora-sidebar");
         if (!sidebar) return false;
 
@@ -56,6 +58,15 @@
 
         // 监听原生 tab 点击
         this._observeTabSwitching();
+
+        // 订阅主题切换 (幂等): 胶囊类主题切换时重算滑块位置
+        if (!this._themeUnsub && window.BetterTypora && window.BetterTypora.theme) {
+            this._themeUnsub = window.BetterTypora.theme.onChange(function () {
+                self._adaptToTheme();
+            });
+        }
+        // 注入后先适配一次 (延迟到布局稳定后测量 offsetLeft)
+        setTimeout(function () { self._adaptToTheme(); }, 120);
 
         // 渲染初始状态
         this._renderEmpty();
@@ -129,6 +140,60 @@
     };
 
     /**
+     * 胶囊标签栏主题适配 (BetterTypora.theme 特征驱动)
+     * 把侧边栏标签栏胶囊化(Capsule)的主题 (如 Claude):
+     *  - 反链标签重排为大纲后的第 3 槽 (避开原生 search 等尾部标签)
+     *  - wrapper 自适应宽度容纳第 3 槽
+     *  - 反链槽收窄 (--bt-tab-w), 空间不足时只压缩反链槽, 不动原生槽
+     *  - 胶囊滑块 (wrapper::before) 在反链激活时滑到反链标签下方并贴合其宽度
+     * 位移/宽度全部由 JS 实测 (offsetLeft / offsetWidth / ::before.left),
+     * 不硬编码坐标, 任何胶囊主题通用。GitHub/默认主题 getSidebarTabsMode()
+     * ="default", 自动回退, 零副作用。
+     */
+    BacklinksPanel.prototype._adaptToTheme = function () {
+        var theme = window.BetterTypora && window.BetterTypora.theme;
+        var wrapper = document.querySelector(".info-panel-tab-wrapper");
+        var tab = document.getElementById("info-panel-tab-backlinks");
+        if (!wrapper || !tab) return;
+        var mode = theme ? theme.getSidebarTabsMode() : "default";
+        if (mode === "capsule") {
+            wrapper.classList.add("bt-capsule");  // CSS: 接管槽体系 (等宽/等比压缩)
+            // 重排: 紧邻大纲标签之后作为第 3 槽, 避免与 search 等原生标签争夺尾部空间
+            var outlineTab = document.getElementById("info-panel-tab-outline");
+            if (outlineTab && outlineTab.nextSibling !== tab && tab.parentNode === wrapper) {
+                wrapper.insertBefore(tab, outlineTab.nextSibling);
+            }
+            // 统一槽宽 = 首个原生槽实测宽 (等宽体系下三槽一致; 压缩后自动跟随)
+            var firstTab = wrapper.querySelector(".info-panel-tab");
+            var slotW = (firstTab && firstTab.offsetWidth) || 82;
+            wrapper.style.setProperty("--bt-tab-w", slotW + "px");
+            // 滑块基准 left (主题自定义), 实测可得
+            var slideLeft = parseFloat(getComputedStyle(wrapper, "::before").left) || 0;
+            // 为每个槽写入滑块档位位移: 槽 offsetLeft - 滑块基准
+            var slots = {
+                "info-panel-tab-file": "--bt-tab-x-files",
+                "info-panel-tab-outline": "--bt-tab-x-outline",
+                "info-panel-tab-search": "--bt-tab-x-search",
+                "info-panel-tab-search-back": "--bt-tab-x-search",
+                "info-panel-tab-backlinks": "--bt-tab-x"
+            };
+            for (var sid in slots) {
+                var sEl = document.getElementById(sid);
+                if (sEl && sEl.parentNode === wrapper) {
+                    wrapper.style.setProperty(slots[sid], ((sEl.offsetLeft || 0) - slideLeft) + "px");
+                }
+            }
+        } else {
+            wrapper.classList.remove("bt-capsule");
+            wrapper.style.removeProperty("--bt-tab-x");
+            wrapper.style.removeProperty("--bt-tab-x-files");
+            wrapper.style.removeProperty("--bt-tab-x-outline");
+            wrapper.style.removeProperty("--bt-tab-x-search");
+            wrapper.style.removeProperty("--bt-tab-w");
+        }
+    };
+
+    /**
      * 显示反链面板（纯 CSS 驱动）
      */
     BacklinksPanel.prototype.show = function () {
@@ -147,6 +212,8 @@
             nativeTabs[i].classList.remove("active");
         }
         this._tabEl.classList.add("active");
+        // 胶囊主题下激活时同步滑块位置
+        this._adaptToTheme();
         this._active = true;
 
         // 同步当前文件路径并渲染
@@ -350,6 +417,13 @@
         this._contentEl = null;
         this._active = false;
         this._clearSnippetCache();
+        // 解绑主题切换订阅 + 清理胶囊适配痕迹
+        if (this._themeUnsub) { try { this._themeUnsub(); } catch (e) {} this._themeUnsub = null; }
+        var wrapper = document.querySelector(".info-panel-tab-wrapper");
+        if (wrapper) {
+            wrapper.classList.remove("bt-capsule");
+            wrapper.style.removeProperty("--bt-tab-x");
+        }
         if (this._guardInterval) { clearInterval(this._guardInterval); this._guardInterval = null; }
         if (this._pathPollInterval) { clearInterval(this._pathPollInterval); this._pathPollInterval = null; }
     };
@@ -367,6 +441,8 @@
                 self.inject();
                 if (self._currentFilePath) self.update(self._currentFilePath);
             }
+            // 周期重测胶囊槽位 (窗口 resize / 侧边栏宽度变化后槽宽位移自愈)
+            try { self._adaptToTheme(); } catch (e) {}
         }, 2000);
     };
 

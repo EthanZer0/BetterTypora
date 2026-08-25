@@ -89,9 +89,13 @@
 
     function detectDarkMode() {
         if (typeof document === "undefined") return false;
+        // 优先使用 BetterTypora.theme 平台统一检测 (CSS 变量指纹, 与所有插件一致)
+        if (window.BetterTypora && window.BetterTypora.theme) {
+            try { return !!window.BetterTypora.theme.isDark(); } catch (e) {}
+        }
+        // 降级: 读 --bg-color 亮度判断暗/亮模式
+        // 而不是 @media (prefers-color-scheme: dark)（那是系统设置，不是 Typora 主题）
         try {
-            // 用 Typora 当前主题的 --bg-color 亮度判断暗/亮模式
-            // 而不是 @media (prefers-color-scheme: dark)（那是系统设置，不是 Typora 主题）
             var bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-color").trim();
             if (!bg) return false;
             // 解析 rgb/rgba/#hex → 相对亮度 (0-1)

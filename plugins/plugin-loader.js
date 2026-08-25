@@ -858,6 +858,396 @@
     };
 
     // ===================================================================
+    // ThemeService — 主题特征检测与切换事件 (BetterTypora.theme)
+    // ===================================================================
+    // 目标: 让插件感知"当前主题长什么样", 而非"当前主题叫什么名字"。
+    // 特征驱动 (对应 README 附录 A): 侧边栏标签栏是否被胶囊化、是否亮/暗、
+    // 滑块档位等, 全部通过 getComputedStyle 实测得出, 不硬编码主题名。
+    //
+    // 典型用法 (反链插件):
+    //   var theme = BetterTypora.theme;
+    //   if (theme.getSidebarTabsMode() === "capsule") { /* 胶囊适配 */ }
+    //   theme.onChange(function(p){ /* 主题切换后重跑适配 */ });
+    function ThemeService() {
+        var listeners = [];
+        var _timer = null;
+        var _lastFp = null;
+        var self = this;
+
+        /** 解析颜色字符串亮度 (ITU-R BT.601), 返回 0..1; 未知颜色取 0.5 */
+        function _luminance(colorStr) {
+            if (!colorStr) return 0.5;
+            var r = 0, g = 0, b = 0;
+            var hex = colorStr.match(/#([0-9a-fA-F]{3,8})/);
+            if (hex) {
+                var h = hex[1];
+                if (h.length >= 6) {
+                    r = parseInt(h.substr(0, 2), 16);
+                    g = parseInt(h.substr(2, 2), 16);
+                    b = parseInt(h.substr(4, 2), 16);
+                } else {
+                    r = parseInt(h[0] + h[0], 16);
+                    g = parseInt(h[1] + h[1], 16);
+                    b = parseInt(h[2] + h[2], 16);
+                }
+            } else {
+                var rgb = colorStr.match(/rgba?\(([^)]+)\)/);
+                if (rgb) {
+                    var parts = rgb[1].split(",");
+                    r = parseFloat(parts[0]) || 0;
+                    g = parseFloat(parts[1]) || 0;
+                    b = parseFloat(parts[2]) || 0;
+                } else {
+                    return 0.5;
+                }
+            }
+            return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        }
+
+        /** 解析 matrix 的 translateX 值 (第 5 个参数); 无平移返回 null */
+        function _translateXOf(transform) {
+            if (!transform || transform === "none") return null;
+            var m = transform.match(/matrix\(\s*([^)]+)\)/);
+            if (!m) return null;
+            var nums = m[1].split(",").map(function (s) { return parseFloat(s.trim()); });
+            if (nums.length >= 5 && !isNaN(nums[4])) return nums[4];
+            return null;
+        }
+
+        /** 当前是否暗色主题 (读 --bg-color 亮度, 不依赖 OS 设置) */
+        this.isDark = function () {
+            var bg = getComputedStyle(document.documentElement)
+                .getPropertyValue("--bg-color").trim();
+            return _luminance(bg) < 0.5;
+        };
+
+        /**
+         * 侧边栏标签栏形态:
+         *   "capsule" — 胶囊化标签栏 (圆角≥半高 + 伪元素滑块指示), 如 Claude 主题
+         *   "default" — 默认平铺标签栏 (GitHub / 原生样式)
+         *   null      — 侧边栏标签栏不存在
+         */
+        this.getSidebarTabsMode = function () {
+            var w = document.querySelector(".info-panel-tab-wrapper");
+            if (!w) return null;
+            var cs = getComputedStyle(w);
+            var br = parseFloat(cs.borderRadius) || 0;
+            var h = w.offsetHeight || parseFloat(cs.height) || 0;
+            if (br > 6 && h > 0 && br >= h / 2) return "capsule";
+            return "default";
+        };
+
+        /**
+         * 胶囊滑块档位: 临时为 sidebar 逐个加上候选激活态类,
+         * 读 wrapper::before 的 translateX, 还原后返回 { 类名: 位移px }。
+         * 让插件"自动知道这个主题的滑块有几档、每档偏移多少", 无需硬编码坐标。
+         */
+        this.getSidebarTabSlots = function () {
+            var sidebar = document.getElementById("typora-sidebar");
+            var w = document.querySelector(".info-panel-tab-wrapper");
+            if (!sidebar || !w) return {};
+            var candidates = [
+                "active-tab-files", "active-tab-outline",
+                "ty-show-search", "active-tab-backlinks",
+            ];
+            var slots = {};
+            var prevCls = sidebar.className;
+            for (var i = 0; i < candidates.length; i++) {
+                (function (cls) {
+                    try {
+                        sidebar.classList.add(cls);
+                        var tx = _translateXOf(getComputedStyle(w, "::before").transform);
+                        if (tx !== null) slots[cls] = tx;
+                    } catch (e) {}
+                })(candidates[i]);
+            }
+            sidebar.className = prevCls;
+            return slots;
+        };
+
+        /** 主题指纹: 亮暗 + 核心 CSS 变量 + 标签栏形态, 任一变化即视为主题切换 */
+        function _fingerprint() {
+            var cs = getComputedStyle(document.documentElement);
+            return (self.isDark() ? "d" : "l") + "|" +
+                cs.getPropertyValue("--bg-color").trim() + "|" +
+                cs.getPropertyValue("--text-color").trim() + "|" +
+                cs.getPropertyValue("--active-file-text-color").trim() + "|" +
+                (self.getSidebarTabsMode() || "");
+        }
+
+        function _notify() {
+            var payload = {
+                isDark: self.isDark(),
+                sidebarTabsMode: self.getSidebarTabsMode(),
+                slots: self.getSidebarTabSlots(),
+            };
+            for (var i = 0; i < listeners.length; i++) {
+                try { listeners[i](payload); } catch (e) {}
+            }
+        }
+
+        function _poll() {
+            var fp = _fingerprint();
+            if (_lastFp === null) { _lastFp = fp; return; }
+            if (fp !== _lastFp) { _lastFp = fp; _notify(); }
+        }
+
+        /** 订阅主题切换; 有订阅者才启动 800ms 指纹轮询; 返回解绑函数 */
+        this.onChange = function (fn) {
+            if (typeof fn !== "function") return null;
+            listeners.push(fn);
+            if (!_timer) {
+                _lastFp = _fingerprint();
+                _timer = setInterval(function () { try { _poll(); } catch (e) {} }, 800);
+            }
+            return function () { self.offChange(fn); };
+        };
+
+        this.offChange = function (fn) {
+            var i = listeners.indexOf(fn);
+            if (i >= 0) listeners.splice(i, 1);
+            if (listeners.length === 0 && _timer) {
+                clearInterval(_timer);
+                _timer = null;
+            }
+        };
+    }
+
+    // ===================================================================
+    // PreferencePanelBridge — 偏好设置"插件"栏目 (webview 注入)
+    // ===================================================================
+    // Typora 偏好设置是独立 webview (page-dist/setting.html, React 应用)。
+    // 通过 webview.executeJavaScript 注入"插件"栏目:
+    //   侧边栏 .list-group-content 追加 nav-group-item, .pane 追加 content 面板
+    // 通信: 主文档 webviewEl.send() → webview ipcRenderer.on() (数据推送)
+    //       webview ipcRenderer.send() → 主文档 webviewEl 'ipc-message' (操作请求)
+    // 面板复用 setting 页面样式类 (.panel-header/.input-group/table), 自动主题适配
+
+    var _prefWebview = null;       // 偏好设置 webview 元素
+    var _prefInjected = false;     // 注入标记
+    var _prefWatchTimer = null;    // webview 出现轮询
+
+    /** webview 内执行的注入代码 */
+    var BT_PREF_INJECT_JS = [
+        "(function(){",
+        "  if (window.__btPrefInjected) return;",   // 幂等: 重复注入不再叠加监听/委托/定时器
+        "  window.__btPrefInjected = true;",
+        "  var NAV_ID = 'bt-pref-nav-plugins';",
+        "  var PANEL_ID = 'bt-pref-panel-plugins';",
+        "  function sendToHost(ch, data){ try { require('electron').ipcRenderer.sendToHost(ch, data); } catch (e) {} }",
+        "  function ensureUI(){",
+        "    if (document.getElementById(NAV_ID)) return true;",
+        "    var sidebar = document.querySelector('.list-group-content');",
+        "    var pane = document.querySelector('.pane');",
+        "    if (!sidebar || !pane) return false;",
+        "    var nav = document.createElement('span');",
+        "    nav.id = NAV_ID;",
+        "    nav.className = 'nav-group-item';",
+        "    nav.setAttribute('data-index', 'bt-plugins');",
+        "    nav.textContent = '插件';",
+        "    sidebar.appendChild(nav);",
+        "    var panel = document.createElement('div');",
+        "    panel.id = PANEL_ID;",
+        "    panel.className = 'content';",
+        "    panel.setAttribute('data-index', 'bt-plugins');",
+        "    panel.style.display = 'none';",
+        "    panel.innerHTML =",
+        "      '<style>' +",
+        "        '.bt-plugin-list { margin-top: 8px; }' +",
+        "        '.bt-plugin-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px; transition: background 0.15s ease; }' +",
+        "        '.bt-plugin-row:hover { background: rgba(128,128,128,0.08); }' +",
+        "        '.bt-switch { position: relative; display: inline-block; width: 34px; height: 20px; flex-shrink: 0; }' +",
+        "        '.bt-switch input { opacity: 0; width: 0; height: 0; position: absolute; }' +",
+        "        '.bt-switch-track { position: absolute; inset: 0; border-radius: 10px; background: rgba(128,128,128,0.3); transition: background 0.18s ease; cursor: pointer; }' +",
+        "        '.bt-switch-track:before { content: \\'\\'; position: absolute; width: 14px; height: 14px; border-radius: 50%; left: 3px; top: 3px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); transition: transform 0.18s ease; }' +",
+        "        '.bt-switch input:checked + .bt-switch-track { background: var(--active-file-text-color, rgba(76,175,80,0.85)); }' +",
+        "        '.bt-switch input:checked + .bt-switch-track:before { transform: translateX(14px); }' +",
+        "        '.bt-switch input:disabled + .bt-switch-track { opacity: 0.5; }' +",
+        "        '.bt-plugin-name { font-weight: 600; white-space: nowrap; }' +",
+        "        '.bt-plugin-version { font-size: 12px; opacity: 0.5; white-space: nowrap; }' +",
+        "        '.bt-plugin-desc { flex: 1; min-width: 0; font-size: 12px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +",
+        "        '.bt-reload-btn { border: none; background: transparent; color: var(--text-color, #333); opacity: 0.6; font-size: 12px; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: background 0.15s ease, opacity 0.15s ease; }' +",
+        "        '.bt-reload-btn:hover { background: rgba(128,128,128,0.12); opacity: 1; }' +",
+        "        '.bt-reload-btn:disabled { opacity: 0.35; cursor: default; }' +",
+        "      '</style>' +",
+        "      '<h3 class=\\'panel-header\\'>插件</h3>' +",
+        "      '<div class=\\'bt-plugin-list\\' id=\\'bt-pref-plugins-list\\'></div>' +",
+        "      '<p style=\\'margin-top:8px;color:rgba(128,128,128,0.6);font-size:12px\\'>插件目录: resources/plugins/</p>';",
+        "    pane.appendChild(panel);",
+        "    nav.addEventListener('click', function(){",
+        "      var cs = document.querySelectorAll('.content');",
+        "      for (var i = 0; i < cs.length; i++) {",
+        "        if (cs[i].id !== PANEL_ID) cs[i].style.display = 'none';",
+        "      }",
+        "      panel.classList.remove('display-none');",
+        "      panel.style.display = '';",
+        "      var ns = document.querySelectorAll('.nav-group-item');",
+        "      for (var j = 0; j < ns.length; j++) ns[j].classList.remove('active');",
+        "      nav.classList.add('active');",
+        "    });",
+        "    var ns2 = document.querySelectorAll('.nav-group-item');",
+        "    for (var k = 0; k < ns2.length; k++) {",
+        "      if (ns2[k].id !== NAV_ID) {",
+        "        ns2[k].addEventListener('click', function(){",
+        "          var cs3 = document.querySelectorAll('.content');",
+        "          for (var m = 0; m < cs3.length; m++) {",
+        "            if (cs3[m].id !== PANEL_ID) cs3[m].style.display = '';",
+        "          }",
+        "          panel.style.display = 'none';",
+        "          nav.classList.remove('active');",
+        "        });",
+        "      }",
+        "    }",
+        "    return true;",
+        "  }",
+        "  function buildRowHTML(p){",
+        "    var checked = p.state === 'enabled' ? 'checked' : '';",
+        "    var errMark = p.state === 'error' ? ' <span class=\\'bt-plugin-err\\' style=\\'color:rgba(229,57,53,0.9);font-size:11px\\'>错误</span>' : '';",
+        "    return '<div class=\\'bt-plugin-row\\' data-id=\\'' + p.id + '\\'>' +",
+        "        '<label class=\\'bt-switch\\'><input type=\\'checkbox\\' data-id=\\'' + p.id + '\\' data-action=\\'toggle\\' ' + checked + '><span class=\\'bt-switch-track\\'></span></label>' +",
+        "        '<span class=\\'bt-plugin-name\\'>' + (p.name || p.id) + '</span>' +",
+        "        '<span class=\\'bt-plugin-version\\'>v' + (p.version || '') + '</span>' + errMark +",
+        "        '<span class=\\'bt-plugin-desc\\'>' + (p.description || '') + '</span>' +",
+        "        '<button class=\\'bt-reload-btn\\' data-id=\\'' + p.id + '\\'>重载</button>' +",
+        "      '</div>';",
+        "  }",
+        "  function render(data){",
+        "    if (!ensureUI()) return;",
+        "    var list = document.getElementById('bt-pref-plugins-list');",
+        "    if (!list) return;",
+        "    var plugins = (data && data.plugins) || [];",
+        "    var html = plugins.map(buildRowHTML).join('');",
+        "    if (!html) html = '<div style=\\'padding:20px;text-align:center;color:rgba(128,128,128,0.6);font-size:13px\\'>暂无已安装的插件</div>';",
+        "    // 全量重建 (简单直观); 仅 HTML 实际变化时写入, 避免保底推送打断 hover",
+        "    if (list.innerHTML !== html) list.innerHTML = html;",
+        "  }",
+        "  document.addEventListener('click', function(e){",
+        "    if (!e.isTrusted) return;  // 忽略程序化事件 (render 更新/脚本触发), 免疫反馈循环",
+        "    // 开关: 用 click 而非 change — 程序化 checked 赋值不会触发真实 click",
+        "    var sw = e.target && e.target.closest ? e.target.closest('.bt-switch') : null;",
+        "    if (sw) {",
+        "      var input = sw.querySelector('input');",
+        "      var id = input ? input.getAttribute('data-id') : null;",
+        "      if (id) {",
+        "        input.disabled = true;",
+        "        sendToHost('bettertypora:plugins-action', { action: 'toggle', id: id });",
+        "        return;",
+        "      }",
+        "    }",
+        "    var btn = e.target && e.target.closest ? e.target.closest('.bt-reload-btn') : null;",
+        "    if (btn) {",
+        "      btn.disabled = true;",
+        "      btn.textContent = '重载中…';",
+        "      sendToHost('bettertypora:plugins-action', { action: 'reload', id: btn.getAttribute('data-id') });",
+        "    }",
+        "  });",
+        "  window.__btPref = { render: render, ensureUI: ensureUI };",
+        "  // 监听主文档推送 (注入时 require 已就绪, 直接同步注册)",
+        "  try {",
+        "    if (window.require && window.require('electron') && window.require('electron').ipcRenderer) {",
+        "      window.require('electron').ipcRenderer.on('bettertypora:plugins', function(evt, data){ render(data); });",
+        "    }",
+        "  } catch (e) {}",
+        "  // UI 就绪后请求一次初始数据 (数据流: 请求 → 主文档推送 → render)",
+        "  (function retry(){",
+        "    if (ensureUI()) { sendToHost('bettertypora:plugins-request', {}); }",
+        "    else { setTimeout(retry, 300); }",
+        "  })();",
+        "})();"
+    ].join("\n");
+
+    /** 当前插件状态快照 (供偏好设置面板显示) */
+    function _btPrefGetData() {
+        var mgr = window.BetterTypora && window.BetterTypora.manager;
+        return { plugins: mgr ? mgr.status() : [] };
+    }
+
+    /** 向 webview 注入栏目代码并推送初始数据 (延迟 + 重试, 等 webview IPC 通道就绪) */
+    function _btPrefInject(wv) {
+        _prefInjected = true;
+        wv.executeJavaScript(BT_PREF_INJECT_JS).then(function () {
+            systemLogger.log("偏好设置「插件」栏目已注入");
+            var tries = 0;
+            var push = function () {
+                try {
+                    if (wv.send) wv.send("bettertypora:plugins", _btPrefGetData());
+                } catch (e) {}
+                tries++;
+                if (tries < 5) setTimeout(push, 800);
+            };
+            setTimeout(push, 500);
+        }).catch(function (e) {
+            systemLogger.warn("偏好设置注入失败:", e.message);
+            _prefInjected = false;   // 失败允许重试
+        });
+    }
+
+    /** 处理 webview 内的操作请求 */
+    function _btPrefHandleAction(msg) {
+        var mgr = window.BetterTypora && window.BetterTypora.manager;
+        if (!mgr || !msg || !msg.id) return;
+        if (msg.action === "toggle") {
+            var p = mgr.get(msg.id);
+            if (!p) return;
+            if (p.state === "enabled") {
+                mgr.disable(msg.id);
+            } else {
+                mgr.enable(msg.id);
+            }
+        } else if (msg.action === "reload") {
+            mgr.reload(msg.id);
+        }
+        // 操作后推送更新
+        if (_prefWebview && _prefWebview.send) {
+            _prefWebview.send("bettertypora:plugins", _btPrefGetData());
+        }
+    }
+
+    /** 绑定 webview 事件 (注入 + 双向通信) */
+    function _btPrefSetupWebview(wv) {
+        var isNew = _prefWebview !== wv;
+        if (isNew) {
+            _prefWebview = wv;
+            // 仅新 webview 重置注入标记; 同一 webview 每秒轮询不得重复注入
+            _prefInjected = false;
+            wv.addEventListener("dom-ready", function () {
+                if (!_prefInjected) _btPrefInject(wv);
+            });
+            wv.addEventListener("ipc-message", function (e) {
+                if (e.channel === "bettertypora:plugins-action") {
+                    _btPrefHandleAction(e.args && e.args[0]);
+                } else if (e.channel === "bettertypora:plugins-request") {
+                    // webview 主动请求数据 (初始推送丢失时保底刷新)
+                    if (_prefWebview && _prefWebview.send) {
+                        _prefWebview.send("bettertypora:plugins", _btPrefGetData());
+                    }
+                }
+            });
+        }
+        // 同一 webview 已注入 → 直接返回, 防止重复注入叠加监听/委托
+        if (_prefInjected) return;
+        // webview 已就绪 (dom-ready 已过) 且未注入 → 直接注入, 不依赖事件时机
+        wv.executeJavaScript("1").then(function () {
+            if (!_prefInjected) _btPrefInject(wv);
+        }).catch(function () {
+            // 未就绪: 等待 dom-ready 或下轮轮询
+        });
+    }
+
+    /** 轮询偏好设置 webview (首次创建或元素重建时绑定) */
+    function _btWatchPreferencePanel() {
+        if (_prefWatchTimer) return;
+        _prefWatchTimer = setInterval(function () {
+            try {
+                var wv = document.querySelector("#uni-preference-panel-view");
+                if (wv) {
+                    _btPrefSetupWebview(wv);
+                }
+            } catch (e) {}
+        }, 1000);
+    }
+
+    // ===================================================================
     // Bootstrap: 初始化并扫描
     // ===================================================================
     function bootstrap() {
@@ -1260,6 +1650,9 @@
             };
         };
 
+        // 主题特征服务 (BetterTypora.theme): isDark/getSidebarTabsMode/getSidebarTabSlots/onChange
+        var themeService = new ThemeService();
+
         // 暴露全局 API
         window.BetterTypora = {
             events: eventBus,
@@ -1268,6 +1661,7 @@
             hotkeys: hotkeyManager,
             manager: pluginManager,
             plugins: pluginManager._plugins,
+            theme: themeService,
 
             // 快捷方法
             getPlugin: function (id) { return pluginManager.get(id); },
@@ -1390,6 +1784,9 @@
                 "🧩 BetterTypora 已就绪 (" + pluginManager.list().length + " 个插件)", 1500
             );
 
+            // 偏好设置面板: 监听 webview 出现, 注入"插件"栏目
+            _btWatchPreferencePanel();
+
             // 菜单注入: 每 500ms 检查 megamenu 是否有我们的元素,
             // frame.js 可能随时重建 innerHTML, 需要持续守护
             var _injectMenu = function () {
@@ -1407,19 +1804,30 @@
                 section.className = "megamenu-section hide";
                 section.id = "megamenu-section-plugins";
                 section.innerHTML =
+                    '<style>' +
+                        '.bt-plugin-list { margin-top: 4px; }' +
+                        '.bt-plugin-row { display: flex; align-items: center; padding: 9px 12px; border-radius: 6px; transition: background 0.15s ease; }' +
+                        '.bt-plugin-row:hover { background: rgba(128,128,128,0.08); }' +
+                        '.bt-plugin-main { display: flex; align-items: center; gap: 8px; min-width: 200px; }' +
+                        '.bt-plugin-name { font-weight: 600; }' +
+                        '.bt-plugin-version { font-size: 12px; opacity: 0.5; }' +
+                        '.bt-plugin-state { font-size: 11px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }' +
+                        '.bt-state-enabled { background: rgba(76,175,80,0.14); color: rgba(76,175,80,0.95); }' +
+                        '.bt-state-disabled { background: rgba(128,128,128,0.14); opacity: 0.75; }' +
+                        '.bt-state-error { background: rgba(229,57,53,0.14); color: rgba(229,57,53,0.95); }' +
+                        '.bt-plugin-desc { flex: 1; min-width: 0; font-size: 12px; opacity: 0.6; margin: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+                        '.bt-plugin-actions { display: flex; gap: 6px; }' +
+                    '</style>' +
                     '<div class="megamenu-menu-panel">' +
-                        '<h1>🧩 插件管理</h1>' +
-                        '<div class="long-btn-wrap" id="bt-plugins-reload-all">' +
-                            '<div class="long-btn"><span>🔄 重载所有插件</span></div>' +
+                        '<h1>插件</h1>' +
+                        '<div class="long-btn-wrap">' +
+                            '<div class="long-btn" id="bt-plugins-reload-all">' +
+                                '<i class="fa fa-refresh"></i><span>重载所有插件</span>' +
+                            '</div>' +
                         '</div>' +
-                        '<table class="table table-striped table-hover" style="margin-top:12px">' +
-                            '<thead><tr><th width="32"></th><th width="20%">插件</th>' +
-                            '<th width="10%">版本</th><th width="10%">状态</th><th>描述</th></tr></thead>' +
-                            '<tbody id="bt-plugins-tbody"></tbody>' +
-                        '</table>' +
-                        '<p class="preference-item-hint" style="margin-top:16px" id="bt-plugins-count"></p>' +
-                        '<div id="bt-plugins-empty" style="display:none;text-align:center;padding:40px 0;color:#999">' +
-                            '<div style="font-size:48px;margin-bottom:12px">📦</div>' +
+                        '<div class="bt-plugin-list" id="bt-plugins-list"></div>' +
+                        '<p class="preference-item-hint" style="margin-top:12px" id="bt-plugins-count"></p>' +
+                        '<div id="bt-plugins-empty" style="display:none;text-align:center;padding:36px 0;color:#999">' +
                             '<div>暂无已安装的插件</div>' +
                             '<div style="font-size:12px;margin-top:4px">将插件放入 resources/plugins/ 目录即可自动加载</div>' +
                         '</div>' +
@@ -1433,31 +1841,60 @@
                     _refreshPluginPanel();
                 });
 
+                // 行操作按钮事件委托 (启用/停用/重载)
+                section.addEventListener("click", function (e) {
+                    var btn = e.target && e.target.closest ? e.target.closest(".bt-plugin-action") : null;
+                    if (!btn) return;
+                    var id = btn.getAttribute("data-id");
+                    var action = btn.getAttribute("data-action");
+                    if (!id) return;
+                    if (action === "toggle") {
+                        var p = window.BetterTypora.manager.get(id);
+                        if (!p) return;
+                        if (p.state === "enabled") window.BetterTypora.manager.disable(id);
+                        else window.BetterTypora.manager.enable(id);
+                    } else if (action === "reload") {
+                        window.BetterTypora.manager.reload(id);
+                    }
+                    _refreshPluginPanel();
+                });
+
                 // --- 2. 刷新面板内容的函数 ---
                 var _refreshPluginPanel = function () {
-                    var tbody = document.getElementById("bt-plugins-tbody");
+                    var listEl = document.getElementById("bt-plugins-list");
                     var countEl = document.getElementById("bt-plugins-count");
                     var emptyEl = document.getElementById("bt-plugins-empty");
-                    if (!tbody) return;
+                    if (!listEl) return;
                     var pstatus = window.BetterTypora.status();
-                    var _e = { enabled: "✅", disabled: "⏸", error: "❌" };
                     var _label = { enabled: "已启用", disabled: "已停用", error: "错误" };
+                    var _cls = { enabled: "bt-state-enabled", disabled: "bt-state-disabled", error: "bt-state-error" };
                     var rows = "";
                     for (var i = 0; i < pstatus.length; i++) {
                         var p = pstatus[i];
+                        var stateCls = _cls[p.state] || "bt-state-disabled";
+                        var stateLabel = _label[p.state] || p.state;
+                        var toggleLabel = p.state === "enabled" ? "停用" : "启用";
                         rows +=
-                            '<tr>' +
-                                '<td style="text-align:center">' + (_e[p.state] || "ℹ") + '</td>' +
-                                '<td>' + (p.name || p.id) + '</td>' +
-                                '<td>' + (p.version || "") + '</td>' +
-                                '<td>' + (_label[p.state] || p.state) + '</td>' +
-                                '<td style="color:#999">' + (p.description || "") + '</td>' +
-                            '</tr>';
+                            '<div class="bt-plugin-row" data-id="' + p.id + '">' +
+                                '<div class="bt-plugin-main">' +
+                                    '<span class="bt-plugin-name">' + (p.name || p.id) + '</span>' +
+                                    '<span class="bt-plugin-version">v' + (p.version || "") + '</span>' +
+                                    '<span class="bt-plugin-state ' + stateCls + '">' + stateLabel + '</span>' +
+                                '</div>' +
+                                '<div class="bt-plugin-desc">' + (p.description || "") + '</div>' +
+                                '<div class="bt-plugin-actions">' +
+                                    '<button class="btn btn-default btn-xs bt-plugin-action" data-id="' + p.id + '" data-action="toggle">' + toggleLabel + '</button>' +
+                                    '<button class="btn btn-default btn-xs bt-plugin-action" data-id="' + p.id + '" data-action="reload">重载</button>' +
+                                '</div>' +
+                            '</div>';
                     }
-                    tbody.innerHTML = rows;
+                    listEl.innerHTML = rows;
                     countEl.textContent = pstatus.length ? "共 " + pstatus.length + " 个插件" : "";
                     if (emptyEl) emptyEl.style.display = pstatus.length ? "none" : "";
                 };
+
+                // 注入时立即渲染一次 (面板打开即有数据)
+                _refreshPluginPanel();
 
                 // --- 3. 菜单项: 插入到 "关闭" 之前 ---
                 var closeLi = null;
@@ -1488,7 +1925,7 @@
                     _refreshPluginPanel();
                     // 弹窗提示
                     var count = (window.BetterTypora.status() || []).length;
-                    window.BetterTypora.toast("🧩 已显示插件状态 (" + count + " 个)", 1500);
+                    window.BetterTypora.toast("已显示插件状态 (" + count + " 个)", 1500);
                 });
                 item.appendChild(link);
 

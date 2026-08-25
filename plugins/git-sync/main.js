@@ -347,9 +347,19 @@ function syncThemeFonts() {
 }
 
 var _themeObserver = null;
+var _themeUnsub = null;   // BetterTypora.theme.onChange 解绑函数
 
 function installThemeObserver() {
-    if (_themeObserver) return;
+    if (_themeObserver || _themeUnsub) return;
+    // 优先使用 BetterTypora.theme 平台主题事件 (CSS 变量指纹, 比监听 stylesheet 更可靠)
+    if (window.BetterTypora && window.BetterTypora.theme &&
+        typeof window.BetterTypora.theme.onChange === "function") {
+        _themeUnsub = window.BetterTypora.theme.onChange(function () {
+            _timers.setTimeout(syncThemeFonts, 50);
+        });
+        return;
+    }
+    // 降级: 旧方案 — 监听 <link rel=stylesheet> 增删
     _themeObserver = new MutationObserver(function (mutations) {
         for (var i = 0; i < mutations.length; i++) {
             var m = mutations[i];
@@ -716,10 +726,14 @@ module.exports = {
             panel = null;
         }
 
-        // 4. 断开 MutationObserver
+        // 4. 断开 MutationObserver / 解绑主题事件
         if (_themeObserver) {
             _themeObserver.disconnect();
             _themeObserver = null;
+        }
+        if (_themeUnsub) {
+            try { _themeUnsub(); } catch (e) {}
+            _themeUnsub = null;
         }
 
         // 5. 清理 DOM 残留
@@ -744,6 +758,7 @@ module.exports = {
         if (_timers) { _timers.close(); _timers = null; }
         uninstallFileOpenListener();
         if (_themeObserver) { _themeObserver.disconnect(); _themeObserver = null; }
+        if (_themeUnsub) { try { _themeUnsub(); } catch (e) {} _themeUnsub = null; }
         logger.log("Git 同步插件已卸载");
     }
 };

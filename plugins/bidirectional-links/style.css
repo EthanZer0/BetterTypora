@@ -187,12 +187,12 @@
     to   { opacity: 1; }
 }
 
-/* 面板 */
+/* 面板 — 主题底色跟随 (深色主题自动深色) */
 #graph-view-overlay .graph-view-panel {
     position: relative;
     width: 92vw; height: 92vh;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: var(--bg-color, #fafafa);
+    border: 1px solid var(--window-border, rgba(128,128,128,0.22));
     border-radius: 12px;
     box-shadow:
         0 1px 3px rgba(0, 0, 0, 0.03),
@@ -233,22 +233,23 @@
     align-items: center;
     gap: 14px;
     padding: 10px 20px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid var(--window-border, rgba(128,128,128,0.22));
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.6);
+    background: var(--bg-color, #fafafa);
 }
 
 #graph-view-overlay .graph-view-title {
     font-size: 14px;
     font-weight: 600;
-    color: #2C3038;
+    color: var(--heading-text-color, var(--text-color, #2C3038));
     white-space: nowrap;
 }
 
 #graph-view-overlay .graph-view-stats {
     font-size: 11px;
     font-weight: 400;
-    color: #8B909A;
+    color: var(--text-color, #8B909A);
+    opacity: 0.65;
     white-space: nowrap;
 }
 
@@ -258,18 +259,18 @@
     max-width: 240px;
     padding: 5px 14px;
     font-size: 12px;
-    background: rgba(0, 0, 0, 0.025);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(128,128,128,0.08);
+    border: 1px solid var(--window-border, rgba(128,128,128,0.22));
     border-radius: 20px;
     outline: none;
-    color: #3C414D;
+    color: var(--text-color, #3C414D);
     margin-left: auto;
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 #graph-view-overlay .graph-view-search:focus {
     border-color: rgba(95, 141, 211, 0.45);
-    background: rgba(255, 255, 255, 0.9);
+    background: var(--bg-color, #fafafa);
     box-shadow: 0 0 0 3px rgba(95, 141, 211, 0.08);
 }
 
@@ -285,14 +286,16 @@
     border: none;
     font-size: 18px;
     cursor: pointer;
-    color: #8B909A;
+    color: var(--text-color, #8B909A);
+    opacity: 0.7;
     padding: 0;
     line-height: 1;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
 #graph-view-overlay .graph-view-close-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #3C414D;
+    background: rgba(128,128,128,0.12);
+    color: var(--text-color, #3C414D);
+    opacity: 1;
 }
 
 /* ---- 设置按钮 ---- */
@@ -300,17 +303,19 @@
     width: 28px; height: 28px;
     border: none;
     background: none;
-    color: #8B909A;
+    color: var(--text-color, #8B909A);
+    opacity: 0.7;
     font-size: 16px;
     cursor: pointer;
     border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
     margin-right: 2px;
 }
 #graph-view-overlay .graph-view-settings-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #3C414D;
+    background: rgba(128,128,128,0.12);
+    color: var(--text-color, #3C414D);
+    opacity: 1;
 }
 
 /* 渲染引擎切换按钮 */
@@ -318,9 +323,9 @@
     width: auto;
     min-width: 34px;
     height: 24px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    background: rgba(0, 0, 0, 0.03);
-    color: #8B909A;
+    border: 1px solid var(--window-border, rgba(128,128,128,0.22));
+    background: rgba(128,128,128,0.08);
+    color: var(--text-color, #8B909A);
     font-size: 10px;
     font-weight: 600;
     cursor: pointer;
@@ -331,9 +336,9 @@
     margin-right: 4px;
 }
 #graph-view-overlay .graph-view-engine-btn:hover {
-    background: rgba(0, 0, 0, 0.08);
-    color: #3C414D;
-    border-color: rgba(0, 0, 0, 0.20);
+    background: rgba(128,128,128,0.16);
+    color: var(--text-color, #3C414D);
+    border-color: var(--window-border, rgba(128,128,128,0.35));
 }
 
 /* ---- 设置面板（右侧滑出） ---- */
@@ -342,8 +347,8 @@
     top: 0; right: 0;
     width: 300px;
     height: 100%;
-    background: rgba(255, 255, 255, 0.97);
-    border-left: 1px solid rgba(0, 0, 0, 0.08);
+    background: var(--bg-color, #fafafa);
+    border-left: 1px solid var(--window-border, rgba(128,128,128,0.22));
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
     z-index: 10;
     padding: 0;
@@ -360,35 +365,39 @@
 .graph-settings-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid var(--window-border, rgba(128,128,128,0.22));
 }
 .graph-settings-title {
     font-size: 13px; font-weight: 600;
-    color: #2C3038;
+    color: var(--heading-text-color, var(--text-color, #2C3038));
 }
 .graph-settings-close {
     width: 24px; height: 24px;
     border: none; background: none;
-    font-size: 18px; color: #8B909A;
+    font-size: 18px; color: var(--text-color, #8B909A);
+    opacity: 0.7;
     cursor: pointer; border-radius: 4px;
     display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, opacity 0.15s;
 }
 .graph-settings-close:hover {
-    background: rgba(0, 0, 0, 0.05);
-    color: #3C414D;
+    background: rgba(128,128,128,0.12);
+    color: var(--text-color, #3C414D);
+    opacity: 1;
 }
 
 /* 参数组 */
 .graph-settings-group {
     padding: 8px 16px 4px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    border-bottom: 1px solid var(--window-border, rgba(128,128,128,0.18));
 }
 .graph-settings-group:last-of-type {
     border-bottom: none;
 }
 .graph-settings-group-title {
     font-size: 11px; font-weight: 600;
-    color: #A0A5B0;
+    color: var(--text-color, #A0A5B0);
+    opacity: 0.55;
     text-transform: none;
     letter-spacing: 0.5px;
     margin-bottom: 6px;
@@ -401,14 +410,15 @@
 }
 .graph-settings-label {
     flex: 0 0 80px;
-    font-size: 11px; color: #5C6068;
+    font-size: 11px; color: var(--text-color, #5C6068);
+    opacity: 0.85;
 }
 .graph-settings-slider {
     flex: 1;
     -webkit-appearance: none;
     appearance: none;
     height: 4px;
-    background: rgba(0, 0, 0, 0.10);
+    background: rgba(128,128,128,0.25);
     border-radius: 2px;
     outline: none;
     cursor: pointer;
@@ -419,7 +429,7 @@
     width: 14px; height: 14px;
     border-radius: 7px;
     background: #5888D0;
-    border: 2px solid #fff;
+    border: 2px solid var(--bg-color, #fff);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: background 0.15s;
@@ -429,7 +439,8 @@
 }
 .graph-settings-value {
     flex: 0 0 42px;
-    font-size: 10px; color: #8B909A;
+    font-size: 10px; color: var(--text-color, #8B909A);
+    opacity: 0.7;
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
@@ -437,22 +448,24 @@
 /* 底部按钮 */
 .graph-settings-footer {
     padding: 12px 16px;
-    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    border-top: 1px solid var(--window-border, rgba(128,128,128,0.22));
     margin-top: auto;
 }
 .graph-settings-reset {
     width: 100%;
     padding: 7px 0;
-    border: 1px solid rgba(0, 0, 0, 0.10);
-    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid var(--window-border, rgba(128,128,128,0.22));
+    background: rgba(128,128,128,0.06);
     border-radius: 6px;
-    font-size: 12px; color: #5C6068;
+    font-size: 12px; color: var(--text-color, #5C6068);
+    opacity: 0.85;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.15s, opacity 0.15s;
 }
 .graph-settings-reset:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #3C414D;
+    background: rgba(128,128,128,0.12);
+    color: var(--text-color, #3C414D);
+    opacity: 1;
 }
 
 /* Canvas — 双 Canvas 堆叠容器 */
@@ -484,14 +497,15 @@
     display: flex;
     gap: 20px;
     padding: 5px 20px;
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    border-top: 1px solid var(--window-border, rgba(128,128,128,0.22));
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.5);
+    background: var(--bg-color, #fafafa);
 }
 
 #graph-view-overlay .graph-view-hint {
     font-size: 10px;
-    color: #A0A5B0;
+    color: var(--text-color, #A0A5B0);
+    opacity: 0.55;
 }
 
 #graph-view-overlay .graph-view-hint:last-child {
@@ -501,7 +515,7 @@
 /* 反链面板中的图谱按钮 */
 .backlinks-graph-btn {
     background: none;
-    border: 1px solid var(--window-border, rgba(0,0,0,0.1));
+    border: 1px solid var(--window-border, rgba(128,128,128,0.22));
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
@@ -512,10 +526,9 @@
 }
 .backlinks-graph-btn:hover {
     opacity: 1;
-    background: var(--item-hover-bg-color, rgba(0,0,0,0.04));
+    background: var(--item-hover-bg-color, rgba(128,128,128,0.10));
 }
 
-/* ===================================================================
  * Wikilink 渲染 — CSS Custom Highlight API (paint 层叠加，不碰 DOM)
  * =================================================================== */
 
@@ -539,4 +552,65 @@
 /* 方括号：极淡，几乎不可见 */
 ::highlight(wikilink-bracket) {
     color: rgba(128, 128, 128, 0.18);
+}
+
+/* ===================================================================
+ * 胶囊标签栏主题适配 (BetterTypora.theme 特征驱动)
+ * 适用: 将侧边栏标签栏胶囊化 + 伪元素滑块的主题 (如 Claude)。
+ * 反链标签作为第 3 槽加入, 滑块在你的切换下物理跟随。
+ * 普通/平铺主题 (GitHub, 默认) 无 wrapper::before 滑块, 以下规则
+ * 自动不匹配, 零副作用。
+ * =================================================================== */
+
+/* 胶囊主题下: 接管槽体系 — 统一等宽槽, 滑块档位全部 JS 实测, 空间不足时三槽等比压缩保持对称 */
+#typora-sidebar .info-panel-tab-wrapper.bt-capsule {
+    width: max-content !important;
+    max-width: calc(100% - 24px);
+}
+
+/* 空间不足时三槽等比例压缩 — 保持各槽等宽、大纲居中、不溢出 */
+#typora-sidebar .info-panel-tab-wrapper.bt-capsule > * {
+    flex-shrink: 1 !important;
+}
+
+/* 所有标签槽等宽 (由 panel.js 实测写入 --bt-tab-w), 覆盖主题固定 82px */
+#typora-sidebar .info-panel-tab-wrapper.bt-capsule .info-panel-tab {
+    width: var(--bt-tab-w, 82px) !important;
+}
+
+/* 标题跟随槽宽, 禁止换行 (防止窄槽把标签文字挤成竖排) */
+#typora-sidebar .info-panel-tab-wrapper.bt-capsule .info-panel-tab .info-panel-tab-title {
+    width: 100%;
+    white-space: nowrap;
+}
+
+/* 滑块宽度: 各激活态统一贴合槽宽 (压缩后由 panel.js 重测) */
+#typora-sidebar.active-tab-files .info-panel-tab-wrapper::before,
+#typora-sidebar.active-tab-outline .info-panel-tab-wrapper::before,
+#typora-sidebar.ty-show-search .info-panel-tab-wrapper::before,
+#typora-sidebar.active-tab-backlinks .info-panel-tab-wrapper::before {
+    width: var(--bt-tab-w, 82px);
+}
+
+/* 滑块位移: 覆盖主题固定档位, 全部使用 panel.js 实测位移 (fallback 与主题原值一致) */
+#typora-sidebar.active-tab-files .info-panel-tab-wrapper::before,
+#typora-sidebar.active-tab-files .info-panel-tab-wrapper::after {
+    transform: translateX(var(--bt-tab-x-files, 0px));
+}
+#typora-sidebar.active-tab-outline .info-panel-tab-wrapper::before,
+#typora-sidebar.active-tab-outline .info-panel-tab-wrapper::after {
+    transform: translateX(var(--bt-tab-x-outline, 86px));
+}
+#typora-sidebar.ty-show-search .info-panel-tab-wrapper::before,
+#typora-sidebar.ty-show-search .info-panel-tab-wrapper::after {
+    transform: translateX(var(--bt-tab-x-search, 86px));
+}
+#typora-sidebar.active-tab-backlinks .info-panel-tab-wrapper::before,
+#typora-sidebar.active-tab-backlinks .info-panel-tab-wrapper::after {
+    transform: translateX(var(--bt-tab-x, 0px));
+}
+
+/* 反链激活文本加粗, 对齐原生活动标签的视觉权重 */
+#typora-sidebar.active-tab-backlinks #info-panel-tab-backlinks .info-panel-tab-title {
+    font-weight: 600;
 }

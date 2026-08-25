@@ -1538,31 +1538,6 @@
     };
 
     // ===================================================================
-    // 主题样式
-    // ===================================================================
-
-    Panel.prototype._updateThemeStyles = function () {
-        if (!this._panelEl) return;
-
-        // 用 Typora 主题 --bg-color 亮度判断暗/亮，而非 OS matchMedia
-        var isDark = false;
-        try {
-            var bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-color").trim();
-            if (bg) isDark = _parseLuminance(bg) < 0.5;
-        } catch (e) {}
-        var bg = "var(--bg-color, " + (isDark ? "#1e1e1e" : "#fff") + ")";
-        this._panelEl.style.background = bg;
-
-        // 按钮主色
-        var btns = this._panelEl.querySelectorAll(".git-btn-primary");
-        for (var i = 0; i < btns.length; i++) {
-            btns[i].style.background = "var(--active-file-text-color, #4a90d9)";
-            btns[i].style.color = "#fff";
-        }
-    };
-
-
-    // ===================================================================
     // UI 辅助
     // ===================================================================
 
@@ -1586,26 +1561,6 @@
         if (status === "??") return "#8b949e";            // gray
         return "var(--text-color,#888)";
     };
-
-    function _parseLuminance(color) {
-        try {
-            var r = 0, g = 0, b = 0;
-            if (color.indexOf("rgb") === 0) {
-                var m = color.match(/[\d.]+/g);
-                if (m && m.length >= 3) { r = +m[0]; g = +m[1]; b = +m[2]; }
-            } else if (color[0] === "#") {
-                var h = color.substring(1);
-                if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-                if (h.length >= 6) { r = parseInt(h.substring(0,2), 16); g = parseInt(h.substring(2,4), 16); b = parseInt(h.substring(4,6), 16); }
-            }
-            var lin = function (c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
-            return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-        } catch (e) { return 0.5; }
-    }
-
-    // ===================================================================
-    // 主题样式初始化
-    // ===================================================================
 
     // ===================================================================
     // 生命周期

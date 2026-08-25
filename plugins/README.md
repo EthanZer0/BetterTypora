@@ -149,7 +149,26 @@ BetterTypora.commands            // CommandRegistry 实例
 BetterTypora.settings            // SettingsManager 实例
 BetterTypora.hotkeys             // HotkeyManager 实例
 BetterTypora.manager             // PluginManager 实例
+BetterTypora.theme               // ThemeService 实例 (主题特征检测 + 切换事件)
 ```
+
+### ThemeService — 主题特征检测
+
+对「当前主题长什么样」做特征检测，不认主题名（与附录 A 同理念）。
+
+```js
+BetterTypora.theme.isDark()                    // → bool  是否暗色主题 (读 --bg-color 亮度)
+BetterTypora.theme.getSidebarTabsMode()        // → "capsule" | "default" | null
+                                               //   侧边栏标签栏是否被胶囊化 (圆角≥半高 + 伪元素滑块)
+BetterTypora.theme.getSidebarTabSlots()        // → {激活态类名: 滑块位移px}
+                                               //   胶囊滑块档位自动发现 (临时加类读 ::before transform)
+BetterTypora.theme.onChange(fn)                // → 订阅主题切换 (CSS 变量指纹轮询), 返回解绑函数
+BetterTypora.theme.offChange(fn)               // → 取消订阅
+```
+
+- 主题切换 = CSS 变量指纹（`--bg-color`/`--text-color`/`--active-file-text-color` + 标签栏形态）变化，换主题文件、亮暗切换都会触发
+- GitHub/默认主题等无胶囊特征时 `getSidebarTabsMode()` 返回 `"default"`，胶囊适配代码零副作用
+- **胶囊滑块适配模式**（bidirectional-links 已内置）：胶囊主题下 wrapper 加 `.bt-capsule`（`width:max-content` 容纳插件的标签槽），反链激活时用 JS 把 `tab.offsetLeft - 滑块left` 写入 CSS 变量 `--bt-tab-x`，配一行 `translateX(var(--bt-tab-x))` 让主题的滑块物理跟随插件标签——位移全部实测，不硬编码坐标
 
 ### EventBus
 
