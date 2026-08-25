@@ -20,10 +20,12 @@
     // 构造函数
     // ===================================================================
 
-    function HighlightRenderer(parser, resolver, linkIndex) {
+    function HighlightRenderer(parser, resolver, linkIndex, fs, path) {
         this._parser = parser;
         this._resolver = resolver;
         this._linkIndex = linkIndex;
+        this._fs = fs;          // 父目录兜底解析用
+        this._path = path;
 
         this._observer = null;
         this._rafPending = false;
@@ -267,14 +269,18 @@
             var parsed = this._parser.parseOne(match[0]);
             if (!parsed || !parsed.target) continue;   // 没有 target 的纯 #heading 引用暂不渲染
 
-            // 验证链接是否可解析
+            // 验证链接是否可解析 (带父目录顶层兜底, 覆盖 Typora 自动挂载
+            // 文件目录时链接到父目录文档的场景)
             var currentFile = this._getCurrentFilePath();
-            var resolvedPath = this._resolver.resolve(
-                parsed.target,
-                currentFile,
-                this._linkIndex ? this._linkIndex.allMdFiles : [],
-                true
-            );
+            var allMd = this._linkIndex ? this._linkIndex.allMdFiles : [];
+            var resolvedPath;
+            if (this._resolver.resolveWithParentFallback) {
+                resolvedPath = this._resolver.resolveWithParentFallback(
+                    parsed.target, currentFile, allMd, true, this._fs, this._path
+                );
+            } else {
+                resolvedPath = this._resolver.resolve(parsed.target, currentFile, allMd, true);
+            }
 
             try {
                 var fullMatch = match[0];

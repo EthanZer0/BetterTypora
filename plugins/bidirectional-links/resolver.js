@@ -356,9 +356,43 @@
         }
     }
 
+    /**
+     * 解析目标 — 带「父目录顶层」兜底。
+     * 标准 resolve 失败时, 若 sourceFilePath 存在, 检查其「父目录的直接父目录」
+     * 顶层的 .md 文件 (精确 basename 匹配, 忽略扩展名/大小写)。
+     *
+     * 覆盖场景: Typora 从桌面双击打开文件时, 自动挂载「文件所在目录」为
+     * mount folder (vault = 文件目录)。此时链接到父目录文档 (如
+     * test-fixtures/测试文件 A.md 链接到父目录的双向链接测试.md) 主索引
+     * 解析不到。此兜底只影响显式链接解析, 不污染 allMdFiles 主索引
+     * (反链面板/知识图谱不受影响)。
+     */
+    function resolveWithParentFallback(target, sourceFilePath, allMdFiles, caseSensitiveFirst, fs, path) {
+        var r = resolve(target, sourceFilePath, allMdFiles, caseSensitiveFirst);
+        if (r || !sourceFilePath || !fs || !path) return r;
+        try {
+            var fileDir = path.dirname(sourceFilePath);
+            var parentDir = path.dirname(fileDir);
+            if (!parentDir || parentDir === fileDir) return null;
+            var targetBase = target.replace(/\\/g, "/").split("/").pop()
+                .replace(/\.md$/i, "").toLowerCase();
+            if (!targetBase) return null;
+            var entries = fs.readdirSync(parentDir);
+            for (var i = 0; i < entries.length; i++) {
+                var name = entries[i];
+                if (!/\.md$/i.test(name)) continue;
+                if (name.replace(/\.md$/i, "").toLowerCase() === targetBase) {
+                    return path.join(parentDir, name);
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
     module.exports = {
         resolve: resolve,
         resolveAll: resolveAll,
+        resolveWithParentFallback: resolveWithParentFallback,
         scanMdFiles: scanMdFiles,
         normalizePath: normalizePath,
         basenameNoExt: basenameNoExt,

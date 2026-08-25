@@ -64,7 +64,13 @@ var _timers = null;
 
 /** 获取当前 vault 根目录 */
 function getVaultRoot() {
-    return BetterTypora.getMountFolder();
+    var mount = BetterTypora.getMountFolder();
+    if (mount) return mount;
+    // 单文件模式 (未打开文件夹): 降级用当前文件所在目录作为 vault,
+    // 让同目录链接可解析 — 修复直接从桌面打开 md 时所有链接灰显
+    var cf = BetterTypora.getCurrentFile();
+    if (cf) return path.dirname(cf);
+    return null;
 }
 
 /** 获取当前打开的文件路径 */
@@ -368,12 +374,20 @@ function handleWikiLinkClick(e) {
         // 自引用 [[#heading]]：target 就是自己
         resolvedPath = currentFile;
     } else {
-        resolvedPath = resolver.resolve(
-            parsed.target,
-            currentFile,
-            linkIndex ? linkIndex.allMdFiles : [],
-            api.getSetting("caseSensitiveFirst", true)
-        );
+        // 带父目录顶层兜底 (覆盖 Typora 自动挂载文件目录时链接父目录文档)
+        resolvedPath = resolver.resolveWithParentFallback
+            ? resolver.resolveWithParentFallback(
+                parsed.target, currentFile,
+                linkIndex ? linkIndex.allMdFiles : [],
+                api.getSetting("caseSensitiveFirst", true),
+                fs, path
+              )
+            : resolver.resolve(
+                parsed.target,
+                currentFile,
+                linkIndex ? linkIndex.allMdFiles : [],
+                api.getSetting("caseSensitiveFirst", true)
+              );
     }
 
     if (!resolvedPath) {
@@ -524,11 +538,11 @@ function buildIndex(onComplete) {
         if (fileWatcher) fileWatcher.stop();
     }
 
-    logger.log("开始索引构建: " + vaultRoot);
+        logger.log("开始索引构建: " + vaultRoot);
 
-    // 扫描所有 .md 文件（walk 本身很快）
-    var mdFiles = resolver.scanMdFiles(fs, path, vaultRoot);
-    logger.log("找到 " + mdFiles.length + " 个 .md 文件");
+        // 扫描所有 .md 文件（walk 本身很快）
+        var mdFiles = resolver.scanMdFiles(fs, path, vaultRoot);
+        logger.log("找到 " + mdFiles.length + " 个 .md 文件");
 
     // 分批异步扫描，不阻塞 UI
     linkIndex.scanAsync(vaultRoot, mdFiles, function (success) {
@@ -544,6 +558,11 @@ function buildIndex(onComplete) {
             if (currentFile && backlinksPanel) {
                 backlinksPanel.update(currentFile);
             }
+
+            // 索引就绪 → 重扫 wikilink 高亮。
+            // 修复: 文件打开早于索引构建完成时, 所有链接因 allMdFiles 为空
+            // 按断链灰显, 且不会自动恢复 (需切换标签页触发 DOM 重建才重扫)。
+            if (highlightRenderer) highlightRenderer._rescanAll();
 
             // 索引构建完成后启动 FileWatcher
             if (fileWatcher) fileWatcher.start();
@@ -761,7 +780,7 @@ module.exports = {
         _timers.setTimeout(function () { installClickInterceptor(); }, 100);
 
         // 8a. 启动 Wikilink Highlight 渲染（CSS Custom Highlight API，零 DOM 触碰）
-        highlightRenderer = new HighlightRenderer(parser, resolver, linkIndex);
+        highlightRenderer = new HighlightRenderer(parser, resolver, linkIndex, fs, path);
         // 延迟启用，等 Typora 先完成初始渲染
         _timers.setTimeout(function () { highlightRenderer.enable(); }, 800);
 
@@ -772,7 +791,9 @@ module.exports = {
             var vaultRoot = getVaultRoot();
             if (!vaultRoot) {
                 _initRetries++;
-                if (_initRetries <= 60) {
+                // 放宽重试窗口 (50ms × 600 = 30s): Typora 延迟恢复文件夹上下文时,
+                // vault 可能在打开文件后才出现 (单文件打开后切到文件夹内其他文件)
+                if (_initRetries <= 600) {
                     _initTimer = _timers.setTimeout(arguments.callee, 50);
                     return;
                 }
@@ -787,6 +808,8 @@ module.exports = {
                 fileWatcher.start();
                 var cf = getCurrentFilePath();
                 if (cf && backlinksPanel) backlinksPanel.update(cf);
+                // 索引就绪 → 重扫高亮 (同上: 避免打开早于索引加载导致链接全灰)
+                if (highlightRenderer) highlightRenderer._rescanAll();
             } else {
                 buildIndex();
             }
