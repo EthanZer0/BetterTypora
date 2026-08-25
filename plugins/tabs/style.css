@@ -163,3 +163,67 @@ body.unibody-window .typora-tab-chip.active {
 }
 
 
+
+/* ===================================================================
+ * 标签右键菜单 — 对齐 Typora 设计语言 (毛玻璃 + CSS 变量自适应)
+ * =================================================================== */
+.typora-tab-menu {
+    position: fixed;
+    z-index: 99998;
+    min-width: 172px;
+    padding: 5px;
+    background: var(--bg-color, #ffffff);
+    border: 1px solid var(--window-border, rgba(128,128,128,0.25));
+    border-radius: 8px;
+    box-shadow:
+        0 6px 24px rgba(0, 0, 0, 0.16),
+        0 1px 3px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+    font-size: 13px;
+    color: var(--text-color, #333);
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+    transform-origin: top left;
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    pointer-events: none;
+    user-select: none;
+    display: none;
+}
+
+.typora-tab-menu.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.typora-tab-menu-item {
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--text-color, #333);
+    white-space: nowrap;
+    transition: background 0.1s ease;
+}
+
+.typora-tab-menu-item:hover {
+    background: var(--item-hover-bg-color, rgba(128,128,128,0.12));
+    color: var(--heading-text-color, var(--text-color, #333));
+}
+
+.typora-tab-menu-item.disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.typora-tab-menu-item.disabled:hover {
+    background: transparent;
+    color: var(--text-color, #333);
+}
+
+.typora-tab-menu-sep {
+    height: 1px;
+    margin: 4px 8px;
+    background: var(--window-border, rgba(128,128,128,0.18));
+}

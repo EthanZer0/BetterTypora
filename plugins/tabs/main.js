@@ -472,6 +472,12 @@ var tabBarUI = {
 
             // --- mousedown ---
             (function (tabId, index) {
+                chip.addEventListener("contextmenu", function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    tabContextMenu.open(tabId, e.clientX, e.clientY);
+                });
+
                 chip.addEventListener("mousedown", function (e) {
                     if (e.button !== 0) return;
                     e.preventDefault();
@@ -945,6 +951,220 @@ function closeTab(tabId) {
         tabBarUI.render();
     }
 }
+
+// ===================================================================
+// 批量关闭 (右键菜单用)
+// ===================================================================
+
+/** 关闭除 tabId 外的所有标签, 最终激活 tabId */
+function closeOtherTabs(tabId) {
+    var ids = [];
+    for (var i = 0; i < tabStore.tabs.length; i++) {
+        if (tabStore.tabs[i].id !== tabId) ids.push(tabStore.tabs[i].id);
+    }
+    batchClose(ids, tabId);
+}
+
+/** 关闭 tabId 左侧所有标签 */
+function closeLeftTabs(tabId) {
+    var idx = tabStore._indexOf(tabId);
+    if (idx <= 0) return;
+    var ids = [];
+    for (var i = idx - 1; i >= 0; i--) ids.push(tabStore.tabs[i].id);
+    batchClose(ids, tabId);
+}
+
+/** 关闭 tabId 右侧所有标签 */
+function closeRightTabs(tabId) {
+    var idx = tabStore._indexOf(tabId);
+    if (idx < 0 || idx >= tabStore.tabs.length - 1) return;
+    var ids = [];
+    for (var i = tabStore.tabs.length - 1; i > idx; i--) ids.push(tabStore.tabs[i].id);
+    batchClose(ids, tabId);
+}
+
+/** 关闭全部标签 (最后一个关闭后保持当前文档不变) */
+function closeAllTabs() {
+    var ids = [];
+    for (var i = 0; i < tabStore.tabs.length; i++) ids.push(tabStore.tabs[i].id);
+    batchClose(ids, null);
+}
+
+/**
+ * 批量关闭 (从右往左), 收尾激活保留标签。
+ * 顺序优化: 非激活标签先关, 激活标签最后关 — 避免批量过程中
+ * closeTab 内部多次 switchToTab 造成文件反复切换。
+ */
+function batchClose(ids, keepTabId) {
+    var active = tabStore.getActive();
+    var activeId = active ? active.id : null;
+    var nonActive = [];
+    for (var i = 0; i < ids.length; i++) {
+        if (ids[i] !== activeId) nonActive.push(ids[i]);
+    }
+    for (var i = nonActive.length - 1; i >= 0; i--) {
+        closeTab(nonActive[i]);
+    }
+    if (activeId && ids.indexOf(activeId) >= 0) {
+        closeTab(activeId);
+    }
+    if (keepTabId) {
+        var keep = tabStore.findById(keepTabId);
+        if (keep) {
+            if (keep.isActive) {
+                tabBarUI.render();
+            } else {
+                switchToTab(keepTabId);
+            }
+        }
+    }
+}
+
+// ===================================================================
+// 标签右键菜单
+// ===================================================================
+
+var tabContextMenu = {
+    el: null,
+    targetTabId: null,
+    _closeHandler: null,
+    _keyHandler: null,
+
+    /** 在 (x, y) 打开针对 tabId 的菜单 */
+    open: function (tabId, x, y) {
+        this.targetTabId = tabId;
+        if (!this.el) this._build();
+        this._updateStates();
+
+        var el = this.el;
+        el.style.display = "block";
+        // 先渲染再测量 (翻转防出屏)
+        var w = el.offsetWidth || 180;
+        var h = el.offsetHeight || 240;
+        var left = x;
+        var top = y;
+        if (left + w > window.innerWidth - 8) left = x - w - 4;
+        if (top + h > window.innerHeight - 8) top = y - h - 4;
+        el.style.left = Math.max(4, left) + "px";
+        el.style.top = Math.max(4, top) + "px";
+        var self = this;
+        requestAnimationFrame(function () { el.classList.add("open"); });
+        this._bindDismiss();
+    },
+
+    close: function () {
+        if (!this.el) return;
+        this.el.classList.remove("open");
+        this.el.style.display = "none";
+        this.targetTabId = null;
+        this._unbindDismiss();
+    },
+
+    _build: function () {
+        var el = document.createElement("div");
+        el.className = "typora-tab-menu";
+        el.setAttribute("data-plugin-id", "tabs");
+        var items = [
+            { fn: "close", label: "关闭此标签" },
+            { sep: true },
+            { fn: "others", label: "关闭其他标签" },
+            { fn: "left", label: "关闭左侧标签" },
+            { fn: "right", label: "关闭右侧标签" },
+            { sep: true },
+            { fn: "all", label: "关闭全部标签" },
+            { fn: "reopen", label: "重新打开已关闭标签" },
+        ];
+        var self = this;
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            if (it.sep) {
+                var sep = document.createElement("div");
+                sep.className = "typora-tab-menu-sep";
+                el.appendChild(sep);
+                continue;
+            }
+            var item = document.createElement("div");
+            item.className = "typora-tab-menu-item";
+            item.setAttribute("data-action", it.fn);
+            item.textContent = it.label;
+            (function (fn) {
+                item.addEventListener("mousedown", function (e) {
+                    e.preventDefault();   // 防止按下瞬间菜单被 dismiss 误关
+                });
+                item.addEventListener("click", function (e) {
+                    e.stopPropagation();
+                    self._exec(fn);
+                });
+            })(it.fn);
+            el.appendChild(item);
+        }
+        document.body.appendChild(el);
+        this.el = el;
+    },
+
+    /** 刷新各菜单项禁用状态 */
+    _updateStates: function () {
+        var n = tabStore.tabs.length;
+        var idx = tabStore._indexOf(this.targetTabId);
+        var setState = function (action, disabled) {
+            var item = this.el.querySelector('[data-action="' + action + '"]');
+            if (item) item.classList.toggle("disabled", disabled);
+        }.bind(this);
+        setState("others", n < 2);
+        setState("left", idx <= 0);
+        setState("right", idx < 0 || idx >= n - 1);
+        setState("all", n < 2);
+        setState("reopen", !tabStore.closedStack || tabStore.closedStack.length === 0);
+    },
+
+    _exec: function (fn) {
+        var tabId = this.targetTabId;
+        this.close();
+        switch (fn) {
+            case "close":
+                if (tabId) closeTab(tabId);
+                break;
+            case "others":
+                if (tabId) closeOtherTabs(tabId);
+                break;
+            case "left":
+                if (tabId) closeLeftTabs(tabId);
+                break;
+            case "right":
+                if (tabId) closeRightTabs(tabId);
+                break;
+            case "all":
+                closeAllTabs();
+                break;
+            case "reopen":
+                tabStore.reopenLast();
+                tabBarUI.render();
+                break;
+        }
+    },
+
+    _bindDismiss: function () {
+        this._unbindDismiss();
+        var self = this;
+        this._closeHandler = function (e) {
+            // 点击菜单外部关闭 (菜单内部 click 已 stopPropagation)
+            if (self.el && !self.el.contains(e.target)) self.close();
+        };
+        this._keyHandler = function (e) {
+            if (e.key === "Escape") self.close();
+        };
+        // capture 确保先于其他处理器
+        document.addEventListener("mousedown", this._closeHandler, true);
+        document.addEventListener("keydown", this._keyHandler, true);
+    },
+
+    _unbindDismiss: function () {
+        if (this._closeHandler) document.removeEventListener("mousedown", this._closeHandler, true);
+        if (this._keyHandler) document.removeEventListener("keydown", this._keyHandler, true);
+        this._closeHandler = null;
+        this._keyHandler = null;
+    },
+};
 
 // ===================================================================
 // 事件监听
