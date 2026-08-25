@@ -1,0 +1,161 @@
+/* ===================================================================
+ * Callouts — Obsidian 风格标注块
+ * 圆角色块 (淡背景 6%) + 左侧 3px 色条 + 标题行 emoji 图标
+ * 类型色 = 深浅通用的中亮色 (附录 A)
+ * =================================================================== */
+
+/* ---------- 基础 ---------- */
+
+#write blockquote.bt-callout {
+    position: relative;
+    margin: 8px 0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border-left: 3px solid var(--callout-color, rgba(128,128,128,0.5));
+    background: var(--callout-bg, rgba(128,128,128,0.06));
+    /* 字号设在块级: 无论 Typora 重建内部 span 结构,
+       标题/内容统一跟随正文 (覆盖引用块继承的较小字号) */
+    font-size: var(--bt-callout-title-size, 15px);
+}
+
+/* 标题行 — 类型色加粗 + emoji 图标 + 可点击折叠 (字号继承块级) */
+#write blockquote.bt-callout .bt-callout-title {
+    margin: 0 0 4px;
+    font-weight: 600;
+    color: var(--callout-color, var(--text-color, #333));
+    cursor: pointer;
+    user-select: none;
+}
+
+/* 类型图标 (CSS 伪元素, 不插入 DOM) */
+#write blockquote.bt-callout .bt-callout-title::before {
+    content: "📝";
+    margin-right: 6px;
+    font-size: 13px;
+    vertical-align: -1px;
+}
+
+/* 标记文本 ([!note] 独立 span) — font-size:0 视觉隐藏 (obgnail 方案):
+   文本保留在 DOM 可编辑不丢失; 编辑态 (md-focus/:focus-within)
+   恢复显示, 防止用户误删看不见的标记。
+   注意: 用后代选择器 (拆分后 marker span 可能嵌在内层 span 内);
+   此 class 只允许加在标记子 span 上, 严禁加在标题容器 (md-plain) 上 */
+#write blockquote.bt-callout .bt-callout-marker {
+    font-size: 0;
+}
+#write blockquote.bt-callout p.md-focus .bt-callout-marker,
+#write blockquote.bt-callout .bt-callout-marker:focus,
+#write blockquote.bt-callout .bt-callout-marker:focus-within {
+    font-size: var(--bt-callout-title-size, 15px);
+}
+
+/* 折叠指示箭头 — SVG 绘制 (data URI, currentColor 跟随类型色) */
+#write blockquote.bt-callout .bt-callout-title::after {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='12' height='12' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 6 8 10 12 6'/%3E%3C/svg%3E");
+    float: right;
+    opacity: 0.55;
+    margin-left: 8px;
+    margin-top: 3px;
+}
+
+/* 折叠态箭头 → 向右 */
+#write blockquote.bt-callout.bt-callout-collapsed .bt-callout-title::after {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='12' height='12' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 4 10 8 6 12'/%3E%3C/svg%3E");
+}
+
+/* 折叠态: 仅显示标题行 */
+#write blockquote.bt-callout.bt-callout-collapsed > :not(p:first-child) {
+    display: none !important;
+}
+
+/* 折叠态 hover 提示 */
+#write blockquote.bt-callout.bt-callout-collapsed .bt-callout-title:hover {
+    opacity: 0.75;
+}
+
+/* ---------- 类型色板 + 图标 ---------- */
+
+#write blockquote.bt-callout[data-callout-type="note"] {
+    --callout-color: #4a90d9;
+    --callout-bg: rgba(74, 144, 217, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="note"] .bt-callout-title::before {
+    content: "📝";
+}
+#write blockquote.bt-callout[data-callout-type="abstract"] {
+    --callout-color: #3fb6b2;
+    --callout-bg: rgba(63, 182, 178, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="abstract"] .bt-callout-title::before {
+    content: "📋";
+}
+#write blockquote.bt-callout[data-callout-type="info"] {
+    --callout-color: #4a90d9;
+    --callout-bg: rgba(74, 144, 217, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="info"] .bt-callout-title::before {
+    content: "ℹ️";
+}
+#write blockquote.bt-callout[data-callout-type="tip"] {
+    --callout-color: #2ea043;
+    --callout-bg: rgba(46, 160, 67, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="tip"] .bt-callout-title::before {
+    content: "💡";
+}
+#write blockquote.bt-callout[data-callout-type="success"] {
+    --callout-color: #2ea043;
+    --callout-bg: rgba(46, 160, 67, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="success"] .bt-callout-title::before {
+    content: "✅";
+}
+#write blockquote.bt-callout[data-callout-type="question"] {
+    --callout-color: #3fb6b2;
+    --callout-bg: rgba(63, 182, 178, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="question"] .bt-callout-title::before {
+    content: "❓";
+}
+#write blockquote.bt-callout[data-callout-type="warning"] {
+    --callout-color: #d29922;
+    --callout-bg: rgba(210, 153, 34, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="warning"] .bt-callout-title::before {
+    content: "⚠️";
+}
+#write blockquote.bt-callout[data-callout-type="failure"] {
+    --callout-color: #e5534b;
+    --callout-bg: rgba(229, 83, 75, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="failure"] .bt-callout-title::before {
+    content: "❌";
+}
+#write blockquote.bt-callout[data-callout-type="danger"] {
+    --callout-color: #e5534b;
+    --callout-bg: rgba(229, 83, 75, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="danger"] .bt-callout-title::before {
+    content: "⚡";
+}
+#write blockquote.bt-callout[data-callout-type="bug"] {
+    --callout-color: #e5534b;
+    --callout-bg: rgba(229, 83, 75, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="bug"] .bt-callout-title::before {
+    content: "🐛";
+}
+#write blockquote.bt-callout[data-callout-type="example"] {
+    --callout-color: #8250df;
+    --callout-bg: rgba(130, 80, 223, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="example"] .bt-callout-title::before {
+    content: "🧪";
+}
+#write blockquote.bt-callout[data-callout-type="quote"] {
+    --callout-color: rgba(128, 128, 128, 0.75);
+    --callout-bg: rgba(128, 128, 128, 0.06);
+}
+#write blockquote.bt-callout[data-callout-type="quote"] .bt-callout-title::before {
+    content: "💬";
+}
