@@ -502,6 +502,36 @@ var isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 ---
 
+## 附录 B：开发流程经验教训
+
+### B.1 脚本化替换文件必须验证结构完整性
+
+**事故**：用 python 按行号切片替换 `style.css` 图谱段时，段尾边界定位到注释内容行而非注释头，导致 Wikilink 段注释起始行 `/* ====` 被误删。后果：`::highlight(wikilink-resolved)` 规则被 CSS 解析器吞进错误配对的注释中——**规则"存在但永远不生效"**，且只影响排在错误配对之后的规则。排查极难（文件正常、注册正常、渲染层正常，唯独浏览器 cssRules 里没有这条规则）。
+
+**验证清单（任何脚本化替换后必做）**：
+- [ ] `/*` 与 `*/` 数量配对（node 统计）
+- [ ] `{` 与 `}` 数量配对
+- [ ] 每个段注释头（`/* ====`）存在且闭合
+- [ ] 浏览器实测：`document.styleSheets` 遍历 `cssRules`，确认目标规则在列——**语法配对只是必要条件，解析层才是最终真相**
+
+### B.2 超长 bash heredoc 会被截断
+
+写入超过约 300 行的 heredoc 内容时，bash 可能报 `here-document delimited by end-of-file` 并**截断内容**（写入不完整文件），用该文件替换会造成数据丢失。改用 Write 工具写文件，或写完后校验行数/尾行内容。
+
+### B.3 CSS Custom Highlight 在 Typora 旧版 Chromium 不支持 var()
+
+`::highlight()` 规则中 `var(--xxx, ...)` 会被整体丢弃（规则不生效），**必须硬编码颜色**。详见 style.css Wikilink 段注释。
+
+### B.4 JS 自动分号插入（ASI）：`return` 后换行 = `return;`
+
+`return\n<expr>` 被解析为 `return;`——函数恒返回 undefined。**`return` 与表达式必须同行**。曾导致 `buildRowHTML` 恒返回 undefined、列表显示"暂无已安装的插件"。
+
+### B.5 解析规则宁严勿宽
+
+resolver 的双向子串模糊匹配让 `[[前缀]]` 误跳转 `前缀A.md`（删除 A 后跳 B）。**无精确匹配即断链**，容错便利应通过显式 UI（如补全列表）实现，而非放宽解析规则。
+
+---
+
 ## 致谢
 
 - [Typora](https://typora.io) — 优秀的 Markdown 编辑器
