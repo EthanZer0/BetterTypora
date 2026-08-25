@@ -556,6 +556,42 @@
     text-underline-offset: 2px;
 }
 
+/* 悬停高亮 — 光晕风格 (由 JS mousemove 命中检测切换注册组)。
+   text-shadow 在 ::highlight 中为较晚加入的属性: 支持则显示光晕,
+   不支持时该声明被忽略, 自动降级为深色字 + 下划线强化 */
+::highlight(wikilink-resolved-hover) {
+    color: #1d4ed8;
+    text-shadow: 0 0 6px rgba(59, 130, 246, 0.45), 0 0 14px rgba(59, 130, 246, 0.22);
+    text-decoration: underline;
+    text-decoration-color: rgba(59, 130, 246, 0.60);
+    text-underline-offset: 2px;
+}
+::highlight(wikilink-broken-hover) {
+    color: #6b7280;
+    text-shadow: 0 0 6px rgba(239, 68, 68, 0.35);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-decoration-color: rgba(239, 68, 68, 0.60);
+    text-underline-offset: 2px;
+}
+
+/* 断链悬停气泡: 目标不存在提示 */
+.bt-link-tooltip {
+    position: fixed;
+    z-index: 99999;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 6px;
+    pointer-events: none;
+    background: #2d2925;
+    color: #faf9f5;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    white-space: nowrap;
+    display: none;
+}
+
 /* 方括号：极淡，几乎不可见 */
 ::highlight(wikilink-bracket) {
     color: rgba(128, 128, 128, 0.18);

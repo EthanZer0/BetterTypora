@@ -33,6 +33,14 @@
         this._enabled = false;
         this._themeUnsub = null;     // BetterTypora.theme.onChange 解绑函数
 
+        // hover 交互状态 (highlight 无法响应 :hover, 由 mousemove 命中检测驱动)
+        this._linkRanges = [];       // [{ range, type: "resolved"|"broken", target }] 全部链接
+        this._linkBrackets = [];     // 括号 Range 列表
+        this._hovered = null;        // 当前悬停的链接条目
+        this._hoverBound = false;
+        this._hoverHandler = null;
+        this._tooltipEl = null;      // 断链气泡
+
         // 主题感知（初始化时检测，暗色模式切换需重新设置）
         this._darkMode = false;
     }
@@ -78,6 +86,9 @@
             });
         }
 
+        // hover 交互 (mousemove 命中检测)
+        this._initHover();
+
         console.log("[HighlightRenderer] 已启用");
     };
 
@@ -92,6 +103,14 @@
             try { this._themeUnsub(); } catch (e) {}
             this._themeUnsub = null;
         }
+        // 清理 hover 监听/气泡 + hover 组注册
+        this._disposeHover();
+        try {
+            if (CSS.highlights) {
+                CSS.highlights.delete("wikilink-resolved-hover");
+                CSS.highlights.delete("wikilink-broken-hover");
+            }
+        } catch (e) { /* ignore */ }
 
         // 清除所有已注册的 highlight
         try {
@@ -206,7 +225,12 @@
         if (!rootEl) return;
         this._processing = true;
 
-        var ranges = { resolved: [], broken: [], bracket: [] };
+        // 收集到实例字段 (hover 命中检测依赖)
+        this._linkRanges = [];
+        this._linkBrackets = [];
+        // 旧 Range 已失效, 重置 hover 状态 (mousemove 会重新命中)
+        this._hovered = null;
+        this._hideTooltip();
 
         // TreeWalker 遍历所有文本节点
         var walker = document.createTreeWalker(
@@ -218,45 +242,56 @@
 
         var textNode;
         while ((textNode = walker.nextNode())) {
-            this._extractRanges(textNode, ranges);
+            this._extractRanges(textNode);
         }
 
-        // 注册到 CSS Highlight Registry
+        this._applyHighlights();
+        this._processing = false;
+    };
+
+    /** 注册全部 highlight 到 CSS Highlight Registry (含 hover 分组) */
+    HighlightRenderer.prototype._applyHighlights = function () {
         try {
             var hl = CSS.highlights;
-            if (ranges.resolved.length > 0) {
-                var rh = new Highlight();
-                for (var ri = 0; ri < ranges.resolved.length; ri++) { rh.add(ranges.resolved[ri]); }
-                hl.set("wikilink-resolved", rh);
-            } else {
-                hl.delete("wikilink-resolved");
+            var h = this._hovered;
+            // 常规组 = 全部 - 悬停项; hover 组 = 悬停项
+            var res = [], bro = [], resHover = [], broHover = [];
+            for (var i = 0; i < this._linkRanges.length; i++) {
+                var lr = this._linkRanges[i];
+                if (lr === h) {
+                    if (lr.type === "resolved") resHover.push(lr.range);
+                    else broHover.push(lr.range);
+                } else {
+                    if (lr.type === "resolved") res.push(lr.range);
+                    else bro.push(lr.range);
+                }
             }
-            if (ranges.broken.length > 0) {
-                var bh = new Highlight();
-                for (var bi = 0; bi < ranges.broken.length; bi++) { bh.add(ranges.broken[bi]); }
-                hl.set("wikilink-broken", bh);
-            } else {
-                hl.delete("wikilink-broken");
-            }
-            if (ranges.bracket.length > 0) {
-                var brh = new Highlight();
-                for (var bri = 0; bri < ranges.bracket.length; bri++) { brh.add(ranges.bracket[bri]); }
-                hl.set("wikilink-bracket", brh);
-            } else {
-                hl.delete("wikilink-bracket");
-            }
+            _setGroup(hl, "wikilink-resolved", res);
+            _setGroup(hl, "wikilink-resolved-hover", resHover);
+            _setGroup(hl, "wikilink-broken", bro);
+            _setGroup(hl, "wikilink-broken-hover", broHover);
+            _setGroup(hl, "wikilink-bracket", this._linkBrackets);
         } catch (e) {
             console.warn("[HighlightRenderer] Highlight set:", e.message);
         }
-
-        this._processing = false;
     };
+
+    /** 把 Range 列表注册为一个 highlight 组 (空则删除) */
+    function _setGroup(hl, name, ranges) {
+        if (ranges.length > 0) {
+            var h = new Highlight();
+            for (var i = 0; i < ranges.length; i++) h.add(ranges[i]);
+            hl.set(name, h);
+        } else {
+            hl.delete(name);
+        }
+    }
 
     // ===================================================================
     // 从文本节点中提取 [[...]] Range
     // ===================================================================
 
-    HighlightRenderer.prototype._extractRanges = function (textNode, ranges) {
+    HighlightRenderer.prototype._extractRanges = function (textNode) {
         var text = textNode.textContent || "";
         if (text.length < 4) return;   // 最少 "[[x]]"
 
@@ -297,7 +332,7 @@
                     var openRange = new Range();
                     openRange.setStart(textNode, absStart);
                     openRange.setEnd(textNode, absInnerStart);
-                    ranges.bracket.push(openRange);
+                    this._linkBrackets.push(openRange);
                 }
 
                 // 内容 Range：有别名时，目标+管道→bracket，别名→resolved/broken
@@ -315,16 +350,16 @@
                             var prefixRange = new Range();
                             prefixRange.setStart(textNode, absInnerStart);
                             prefixRange.setEnd(textNode, absInnerStart + aliasStartInInner);
-                            ranges.bracket.push(prefixRange);
+                            this._linkBrackets.push(prefixRange);
                         }
                         // 别名 → resolved/broken
                         var aliasRange = new Range();
                         aliasRange.setStart(textNode, absInnerStart + aliasStartInInner);
                         aliasRange.setEnd(textNode, absInnerStart + aliasStartInInner + parsed.alias.length);
                         if (resolvedPath) {
-                            ranges.resolved.push(aliasRange);
+                            this._pushLink(aliasRange, "resolved", parsed.target);
                         } else {
-                            ranges.broken.push(aliasRange);
+                            this._pushLink(aliasRange, "broken", parsed.target);
                         }
                         // alias 之后剩余（如 #heading 后缀）→ bracket
                         var tailStartInInner = aliasStartInInner + parsed.alias.length;
@@ -332,22 +367,22 @@
                             var tailRange = new Range();
                             tailRange.setStart(textNode, absInnerStart + tailStartInInner);
                             tailRange.setEnd(textNode, absInnerEnd);
-                            ranges.bracket.push(tailRange);
+                            this._linkBrackets.push(tailRange);
                         }
                     } else {
                         // 回退：找不到 alias 时整个 content 走原逻辑
                         if (resolvedPath) {
-                            ranges.resolved.push(innerRange);
+                            this._pushLink(innerRange, "resolved", parsed.target);
                         } else {
-                            ranges.broken.push(innerRange);
+                            this._pushLink(innerRange, "broken", parsed.target);
                         }
                     }
                 } else {
                     // 无别名，整个内容走原逻辑
                     if (resolvedPath) {
-                        ranges.resolved.push(innerRange);
+                        this._pushLink(innerRange, "resolved", parsed.target);
                     } else {
-                        ranges.broken.push(innerRange);
+                        this._pushLink(innerRange, "broken", parsed.target);
                     }
                 }
 
@@ -356,11 +391,121 @@
                     var closeRange = new Range();
                     closeRange.setStart(textNode, absInnerEnd);
                     closeRange.setEnd(textNode, absMatchEnd);
-                    ranges.bracket.push(closeRange);
+                    this._linkBrackets.push(closeRange);
                 }
             } catch (e) {
                 // Range 创建失败（极罕见），跳过
             }
+        }
+    };
+
+    // ===================================================================
+    // hover 交互 — highlight 无法响应 :hover, 由 mousemove 命中检测驱动
+    // ===================================================================
+
+    /** 记录一个链接 Range 及元数据 (hover 命中检测 + 断链气泡用) */
+    HighlightRenderer.prototype._pushLink = function (range, type, target) {
+        this._linkRanges.push({ range: range, type: type, target: target });
+    };
+
+    /** 绑定 mousemove 监听 (enable 时调用, 幂等) */
+    HighlightRenderer.prototype._initHover = function () {
+        if (this._hoverBound) return;
+        this._hoverBound = true;
+        var self = this;
+        var lastHit = null;
+        var lastTime = 0;
+        this._hoverHandler = function (e) {
+            var now = Date.now();
+            if (now - lastTime < 40) return;   // 节流 40ms
+            lastTime = now;
+            var hit = self._hitTest(e.clientX, e.clientY);
+            if (hit === lastHit) {
+                // 气泡跟随鼠标移动
+                if (hit && self._tooltipEl && self._tooltipEl.style.display !== "none") {
+                    self._moveTooltip(e);
+                }
+                return;
+            }
+            lastHit = hit;
+            self._setHover(hit, e);
+        };
+        document.addEventListener("mousemove", this._hoverHandler, true);
+    };
+
+    /** 鼠标位置命中检测: 落在某个链接 Range 内则返回该条目 */
+    HighlightRenderer.prototype._hitTest = function (x, y) {
+        if (!this._enabled) return null;
+        var range;
+        try { range = document.caretRangeFromPoint(x, y); } catch (e) { return null; }
+        if (!range || !range.startContainer) return null;
+        var node = range.startContainer;
+        var off = range.startOffset;
+        var links = this._linkRanges;
+        for (var i = 0; i < links.length; i++) {
+            var lr = links[i];
+            var r = lr.range;
+            if (r.startContainer === node && off >= r.startOffset && off <= r.endOffset) {
+                return lr;
+            }
+        }
+        return null;
+    };
+
+    /** 切换 hover 状态: 重建 highlight 分组 + 断链气泡 */
+    HighlightRenderer.prototype._setHover = function (hit, e) {
+        this._hovered = hit;
+        this._applyHighlights();
+        if (hit && hit.type === "broken") {
+            this._showTooltip(hit);
+            if (e) this._moveTooltip(e);
+        } else {
+            this._hideTooltip();
+        }
+    };
+
+    /** 断链气泡: 显示「目标不存在: xxx」 */
+    HighlightRenderer.prototype._showTooltip = function (hit) {
+        if (!this._tooltipEl) {
+            this._tooltipEl = document.createElement("div");
+            this._tooltipEl.className = "bt-link-tooltip";
+            this._tooltipEl.setAttribute("data-plugin-id", "bidirectional-links");
+            document.body.appendChild(this._tooltipEl);
+        }
+        this._tooltipEl.textContent = "目标不存在: " + (hit.target || "");
+        this._tooltipEl.style.display = "block";
+    };
+
+    HighlightRenderer.prototype._hideTooltip = function () {
+        if (this._tooltipEl) this._tooltipEl.style.display = "none";
+    };
+
+    HighlightRenderer.prototype._moveTooltip = function (e) {
+        var el = this._tooltipEl;
+        if (!el) return;
+        var pad = 12;
+        var left = e.clientX + pad;
+        var top = e.clientY + pad;
+        // 靠近右/下边缘时翻转, 避免出屏
+        var w = el.offsetWidth || 160;
+        var h = el.offsetHeight || 28;
+        if (left + w > window.innerWidth - 8) left = e.clientX - w - pad;
+        if (top + h > window.innerHeight - 8) top = e.clientY - h - pad;
+        el.style.left = left + "px";
+        el.style.top = top + "px";
+    };
+
+    /** 清理 hover 状态 (disable 时) */
+    HighlightRenderer.prototype._disposeHover = function () {
+        if (this._hoverHandler) {
+            document.removeEventListener("mousemove", this._hoverHandler, true);
+            this._hoverHandler = null;
+        }
+        this._hoverBound = false;
+        this._hovered = null;
+        if (this._tooltipEl) {
+            try { if (this._tooltipEl.parentNode) this._tooltipEl.parentNode.removeChild(this._tooltipEl); } catch (e) {}
+            this._tooltipEl = null;
         }
     };
 
