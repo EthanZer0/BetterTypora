@@ -40,6 +40,8 @@
         this._hoverBound = false;
         this._hoverHandler = null;
         this._tooltipEl = null;      // 断链气泡
+        this._tooltipW = 0;          // 气泡尺寸缓存 (避免每次读取触发 reflow)
+        this._tooltipH = 0;
 
         // 主题感知（初始化时检测，暗色模式切换需重新设置）
         this._darkMode = false;
@@ -584,20 +586,30 @@
         var self = this;
         var lastHit = null;
         var lastTime = 0;
+        var lastPosX = 0, lastPosY = 0, rafPending = false;
         this._hoverHandler = function (e) {
+            // 命中检测保持节流 (遍历链接列表有开销)
             var now = Date.now();
-            if (now - lastTime < 40) return;   // 节流 40ms
-            lastTime = now;
-            var hit = self._hitTest(e.clientX, e.clientY);
-            if (hit === lastHit) {
-                // 气泡跟随鼠标移动
-                if (hit && self._tooltipEl && self._tooltipEl.style.display !== "none") {
-                    self._moveTooltip(e);
+            if (now - lastTime >= 40) {
+                lastTime = now;
+                var hit = self._hitTest(e.clientX, e.clientY);
+                if (hit !== lastHit) {
+                    lastHit = hit;
+                    self._setHover(hit, e);
                 }
-                return;
             }
-            lastHit = hit;
-            self._setHover(hit, e);
+            // 气泡位置: rAF 合并 (每帧最多一次), transform 合成器动画平滑不掉帧
+            if (self._tooltipEl && self._tooltipEl.style.display !== "none") {
+                lastPosX = e.clientX;
+                lastPosY = e.clientY;
+                if (!rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(function () {
+                        rafPending = false;
+                        self._moveTooltipAt(lastPosX, lastPosY);
+                    });
+                }
+            }
         };
         document.addEventListener("mousemove", this._hoverHandler, true);
     };
@@ -632,7 +644,7 @@
         this._applyHighlights();
         if (hit && hit.type === "broken") {
             this._showTooltip(hit);
-            if (e) this._moveTooltip(e);
+            if (e) this._moveTooltipAt(e.clientX, e.clientY);
         } else {
             this._hideTooltip();
         }
@@ -647,6 +659,9 @@
             document.body.appendChild(this._tooltipEl);
         }
         this._tooltipEl.textContent = "目标不存在: " + (hit.target || "");
+        // 内容变化 → 尺寸缓存失效, 重新测量
+        this._tooltipW = 0;
+        this._tooltipH = 0;
         this._tooltipEl.style.display = "block";
     };
 
@@ -654,19 +669,22 @@
         if (this._tooltipEl) this._tooltipEl.style.display = "none";
     };
 
-    HighlightRenderer.prototype._moveTooltip = function (e) {
+    /** 气泡移动到 (x, y) — transform 合成器动画, 不触发 reflow */
+    HighlightRenderer.prototype._moveTooltipAt = function (x, y) {
         var el = this._tooltipEl;
         if (!el) return;
+        // 尺寸缓存 (避免每次读取 offsetWidth/offsetHeight 强制布局)
+        if (!this._tooltipW) {
+            this._tooltipW = el.offsetWidth || 160;
+            this._tooltipH = el.offsetHeight || 28;
+        }
         var pad = 12;
-        var left = e.clientX + pad;
-        var top = e.clientY + pad;
+        var tx = x + pad;
+        var ty = y + pad;
         // 靠近右/下边缘时翻转, 避免出屏
-        var w = el.offsetWidth || 160;
-        var h = el.offsetHeight || 28;
-        if (left + w > window.innerWidth - 8) left = e.clientX - w - pad;
-        if (top + h > window.innerHeight - 8) top = e.clientY - h - pad;
-        el.style.left = left + "px";
-        el.style.top = top + "px";
+        if (tx + this._tooltipW > window.innerWidth - 8) tx = x - this._tooltipW - pad;
+        if (ty + this._tooltipH > window.innerHeight - 8) ty = y - this._tooltipH - pad;
+        el.style.transform = "translate(" + Math.round(tx) + "px," + Math.round(ty) + "px)";
     };
 
     /** 清理 hover 状态 (disable 时) */
