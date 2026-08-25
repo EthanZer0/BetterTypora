@@ -228,6 +228,7 @@
         // 收集到实例字段 (hover 命中检测依赖)
         this._linkRanges = [];
         this._linkBrackets = [];
+        this._headingsCache = this._collectHeadings();   // 纯 #heading 自引用校验
         // 旧 Range 已失效, 重置 hover 状态 (mousemove 会重新命中)
         this._hovered = null;
         this._hideTooltip();
@@ -302,20 +303,27 @@
             if (match[1].trim() === "") continue;
 
             var parsed = this._parser.parseOne(match[0]);
-            if (!parsed || !parsed.target) continue;   // 没有 target 的纯 #heading 引用暂不渲染
+            if (!parsed || (!parsed.target && !parsed.heading)) continue;
 
-            // 验证链接是否可解析 (带父目录顶层兜底, 覆盖 Typora 自动挂载
-            // 文件目录时链接到父目录文档的场景)
+            // 验证链接是否可解析:
+            // - 有 target: 文件解析 (带父目录顶层兜底)
+            // - 纯 #heading 自引用: 标题存在于当前文件 → resolved, 否则断链
             var currentFile = this._getCurrentFilePath();
             var allMd = this._linkIndex ? this._linkIndex.allMdFiles : [];
             var resolvedPath;
-            if (this._resolver.resolveWithParentFallback) {
-                resolvedPath = this._resolver.resolveWithParentFallback(
-                    parsed.target, currentFile, allMd, true, this._fs, this._path
-                );
-            } else {
-                resolvedPath = this._resolver.resolve(parsed.target, currentFile, allMd, true);
+            if (parsed.target) {
+                if (this._resolver.resolveWithParentFallback) {
+                    resolvedPath = this._resolver.resolveWithParentFallback(
+                        parsed.target, currentFile, allMd, true, this._fs, this._path
+                    );
+                } else {
+                    resolvedPath = this._resolver.resolve(parsed.target, currentFile, allMd, true);
+                }
+            } else if (parsed.heading) {
+                resolvedPath = this._headingExists(parsed.heading) ? currentFile : null;
             }
+            // 气泡/元数据展示用目标 (纯 heading 引用显示 #标题)
+            var displayTarget = parsed.target || (parsed.heading ? "#" + parsed.heading : "");
 
             try {
                 var fullMatch = match[0];
@@ -357,9 +365,9 @@
                         aliasRange.setStart(textNode, absInnerStart + aliasStartInInner);
                         aliasRange.setEnd(textNode, absInnerStart + aliasStartInInner + parsed.alias.length);
                         if (resolvedPath) {
-                            this._pushLink(aliasRange, "resolved", parsed.target);
+                            this._pushLink(aliasRange, "resolved", displayTarget);
                         } else {
-                            this._pushLink(aliasRange, "broken", parsed.target);
+                            this._pushLink(aliasRange, "broken", displayTarget);
                         }
                         // alias 之后剩余（如 #heading 后缀）→ bracket
                         var tailStartInInner = aliasStartInInner + parsed.alias.length;
@@ -372,17 +380,17 @@
                     } else {
                         // 回退：找不到 alias 时整个 content 走原逻辑
                         if (resolvedPath) {
-                            this._pushLink(innerRange, "resolved", parsed.target);
+                            this._pushLink(innerRange, "resolved", displayTarget);
                         } else {
-                            this._pushLink(innerRange, "broken", parsed.target);
+                            this._pushLink(innerRange, "broken", displayTarget);
                         }
                     }
                 } else {
                     // 无别名，整个内容走原逻辑
                     if (resolvedPath) {
-                        this._pushLink(innerRange, "resolved", parsed.target);
+                        this._pushLink(innerRange, "resolved", displayTarget);
                     } else {
-                        this._pushLink(innerRange, "broken", parsed.target);
+                        this._pushLink(innerRange, "broken", displayTarget);
                     }
                 }
 
@@ -406,6 +414,26 @@
     /** 记录一个链接 Range 及元数据 (hover 命中检测 + 断链气泡用) */
     HighlightRenderer.prototype._pushLink = function (range, type, target) {
         this._linkRanges.push({ range: range, type: type, target: target });
+    };
+
+    /** 收集当前文件所有标题文本 (小写集合), 供纯 #heading 自引用校验 */
+    HighlightRenderer.prototype._collectHeadings = function () {
+        var set = {};
+        var writeEl = document.getElementById("write");
+        if (!writeEl) return set;
+        var hs = writeEl.querySelectorAll("[mdtype='heading']");
+        for (var i = 0; i < hs.length; i++) {
+            var t = (hs[i].textContent || "").trim();
+            if (t) set[t.toLowerCase()] = true;
+        }
+        return set;
+    };
+
+    /** 纯 #heading 自引用: 标题是否存在于当前文件 */
+    HighlightRenderer.prototype._headingExists = function (heading) {
+        var h = (heading || "").trim().toLowerCase();
+        if (!h) return false;
+        return !!(this._headingsCache && this._headingsCache[h]);
     };
 
     /** 绑定 mousemove 监听 (enable 时调用, 幂等) */
