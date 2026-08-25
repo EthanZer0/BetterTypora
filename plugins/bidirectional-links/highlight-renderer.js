@@ -29,6 +29,7 @@
         this._rafPending = false;
         this._processing = false;    // 防止自触发循环
         this._enabled = false;
+        this._themeUnsub = null;     // BetterTypora.theme.onChange 解绑函数
 
         // 主题感知（初始化时检测，暗色模式切换需重新设置）
         this._darkMode = false;
@@ -65,6 +66,16 @@
             characterData: true,
         });
 
+        // 主题切换 → 强制全量重扫。
+        // 主题切换可能重建 #write DOM, 旧 Range 失效后高亮消失;
+        // _darkObserver 只在"暗色状态变化"时重扫, 深↔深等切换会漏。
+        // BetterTypora.theme.onChange 指纹事件覆盖任意主题切换。
+        if (!this._themeUnsub && window.BetterTypora && window.BetterTypora.theme) {
+            this._themeUnsub = window.BetterTypora.theme.onChange(function () {
+                if (self._enabled) self._rescanAll();
+            });
+        }
+
         console.log("[HighlightRenderer] 已启用");
     };
 
@@ -73,6 +84,11 @@
         if (this._observer) {
             this._observer.disconnect();
             this._observer = null;
+        }
+        // 解绑主题订阅
+        if (this._themeUnsub) {
+            try { this._themeUnsub(); } catch (e) {}
+            this._themeUnsub = null;
         }
 
         // 清除所有已注册的 highlight

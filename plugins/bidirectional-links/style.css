@@ -76,13 +76,13 @@
     display: flex;
     align-items: baseline;
     gap: 6px;
-    border-bottom: 1px solid var(--window-border, rgba(0, 0, 0, 0.07));
+    border-bottom: 1px solid var(--window-border, rgba(128,128,128,0.18));
 }
 
 .backlinks-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--heading-text-color, #333);
+    color: var(--heading-text-color, var(--text-color, #333));
 }
 
 .backlinks-count {
@@ -110,13 +110,13 @@
 }
 
 .backlink-group:hover {
-    background: var(--item-hover-bg-color, rgba(0, 0, 0, 0.04));
+    background: var(--item-hover-bg-color, rgba(128,128,128,0.10));
 }
 
 .backlink-source {
     font-size: 13px;
     font-weight: 500;
-    color: var(--heading-text-color, #333);
+    color: var(--heading-text-color, var(--text-color, #333));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -133,9 +133,13 @@
     font-size: 12px;
     color: var(--text-color, #888);
     opacity: 0.65;
-    white-space: nowrap;
+    /* 最多两行 — 片段内含 [[目标]] 高亮, 单行省略会把它挤出可视区; 换行保证可见 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-all;
     line-height: 1.5;
 }
 
@@ -529,10 +533,13 @@
     background: var(--item-hover-bg-color, rgba(128,128,128,0.10));
 }
 
+/* ===================================================================
  * Wikilink 渲染 — CSS Custom Highlight API (paint 层叠加，不碰 DOM)
  * =================================================================== */
 
-/* 已解析的链接：蓝色下划线，可点击暗示 */
+/* 已解析的链接：蓝色下划线，可点击暗示。
+   注意: 不使用 var() — Typora 旧版 Chromium 的 ::highlight 伪元素
+   不支持 CSS 变量解析 (会整体失效), 只能硬编码。 */
 ::highlight(wikilink-resolved) {
     color: #3b82f6;
     text-decoration: underline;

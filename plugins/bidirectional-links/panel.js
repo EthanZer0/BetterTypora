@@ -377,15 +377,25 @@
     };
 
     BacklinksPanel.prototype._extractSnippet = function (content, targetName, contextChars) {
-        var searchStr = "[[" + targetName;
-        var idx = content.indexOf(searchStr);
-        if (idx === -1) { searchStr = "[[ " + targetName; idx = content.indexOf(searchStr); }
-        if (idx === -1) { idx = content.toLowerCase().indexOf(("[[" + targetName).toLowerCase()); }
+        // 片段总长上限 (含链接): 保证 [[目标]] 在窄侧边栏内完整可见,
+        // 前后文只作对称辅助 (旧实现 40+40 字符单行省略会把高亮挤出可视区)
+        var MAX_SNIPPET_LEN = 44;
+        // 优先精确匹配 [[target]] 闭合形式, 避免 [[前缀]] 命中 [[前缀A]]
+        var idx = content.indexOf("[[" + targetName + "]]");
+        if (idx === -1) {
+            var searchStr = "[[" + targetName;
+            idx = content.indexOf(searchStr);
+            if (idx === -1) { searchStr = "[[ " + targetName; idx = content.indexOf(searchStr); }
+            if (idx === -1) { idx = content.toLowerCase().indexOf(("[[" + targetName).toLowerCase()); }
+        }
         if (idx >= 0) {
             var closeEnd = content.indexOf("]]", idx);
             var linkEnd = closeEnd >= 0 ? closeEnd + 2 : idx + targetName.length + 4;
-            var start = Math.max(0, idx - contextChars);
-            var end = Math.min(content.length, linkEnd + contextChars);
+            var linkLen = linkEnd - idx;
+            // 前后文按剩余预算均分
+            var side = Math.max(0, Math.floor((MAX_SNIPPET_LEN - linkLen) / 2));
+            var start = Math.max(0, idx - side);
+            var end = Math.min(content.length, linkEnd + side);
             var before = content.slice(start, idx).replace(/\n/g, " ").trim();
             var linkText = content.slice(idx, linkEnd);
             var after = content.slice(linkEnd, end).replace(/\n/g, " ").trim();
