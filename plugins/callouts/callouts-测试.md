@@ -27,8 +27,9 @@
 > [!question] 疑问
 > 青色系。别名：`help`、`faq`。
 
-> [!warning] 警告
-> 黄色系。别名：`caution`、`attention`。
+> [!tip]
+>
+> 124
 
 > [!failure] 失败
 > 红色系。别名：`fail`、`missing`。
