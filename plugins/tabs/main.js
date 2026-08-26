@@ -1611,6 +1611,30 @@ module.exports = {
             if (excluded) _excluded[filePath] = true;
             else delete _excluded[filePath];
             tabBarUI.render();
+            // 被排除的是激活标签 (发送到右栏) → 激活相邻可见标签
+            // (纯视觉选中 activateTab, 不切换文件 — Typora 当前文件
+            //  仍是发送的文件, 由 split-view 管理)
+            if (excluded) {
+                var active = tabStore.getActive();
+                if (active && active.filePath === filePath) {
+                    var idx = tabStore._indexOf(active.id);
+                    // 右邻优先, 无则左邻
+                    for (var i = idx + 1; i < tabStore.tabs.length; i++) {
+                        if (!isExcluded(tabStore.tabs[i].filePath)) {
+                            tabStore.activateTab(tabStore.tabs[i].id);
+                            tabBarUI.render();
+                            return;
+                        }
+                    }
+                    for (var j = idx - 1; j >= 0; j--) {
+                        if (!isExcluded(tabStore.tabs[j].filePath)) {
+                            tabStore.activateTab(tabStore.tabs[j].id);
+                            tabBarUI.render();
+                            return;
+                        }
+                    }
+                }
+            }
         }, "标记/取消标签为分屏排除 (split-view 协作)");
 
         api.registerCommand("clear-excluded", function () {

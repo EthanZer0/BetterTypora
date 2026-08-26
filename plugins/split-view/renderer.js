@@ -34,16 +34,23 @@ function getRenderer() {
 
     // 图片: 相对路径 → file:// 绝对路径
     r.image = function (href, title, text) {
+        if (typeof href !== "string") {
+            href = href && typeof href.href === "string" ? href.href : "";
+        }
         var src = resolveResource(href);
         var alt = (text || "").replace(/"/g, "&quot;");
-        var t = title ? ' title="' + title.replace(/"/g, "&quot;") + '"' : "";
+        var t = title ? ' title="' + String(title).replace(/"/g, "&quot;") + '"' : "";
         return '<img src="' + src + '" alt="' + alt + '"' + t + '>';
     };
 
     // 链接: 本地 .md → data-bt-link (点击在主栏打开); 其余原样
     r.link = function (href, title, text) {
+        // marked v18+ 可能传非字符串 (token 对象等) — 防御
+        if (typeof href !== "string") {
+            href = href && typeof href.href === "string" ? href.href : "";
+        }
         if (!href) return text || "";
-        var t = title ? ' title="' + title.replace(/"/g, "&quot;") + '"' : "";
+        var t = title ? ' title="' + String(title).replace(/"/g, "&quot;") + '"' : "";
         var safeHref = href.replace(/"/g, "&quot;");
         if (isLocalMarkdown(href)) {
             return '<a href="#" data-bt-link="' + safeHref.replace(/&quot;/g, "&quot;") + '"' + t + ">" + text + "</a>";

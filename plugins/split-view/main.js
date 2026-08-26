@@ -49,6 +49,8 @@ var _layoutTimer = null;
 var _handlers = {};
 var _ctxMenu = null;
 var _ctxTargetIdx = -1;
+var _scrollState = {};       // filePath → scrollTop (切换时保存, recoverPosOrScroll 恢复)
+var _origRecover = null;     // 原始 File.recoverPosOrScroll (包装用)
 
 /* ------------------------------------------------------------------ */
 /* tabs 插件协作 (命令通道)                                               */
@@ -183,6 +185,8 @@ function onLayoutTick() {
         measureLayout();
         syncEditor();
     }
+    // 编辑器滚动持续恢复已移除 (滚动同步方案放弃)
+
     updateDirty();
 }
 
@@ -261,11 +265,11 @@ function closeRightTab(idx) {
     afterRightTabsChanged();
 }
 
-/** 右栈变化后: 活动栏同步 / 预览刷新 */
+/** 右栈变化后: 空 → 自动关闭分屏; 否则活动栏同步 / 预览刷新 */
 function afterRightTabsChanged() {
     if (_rightTabs.length === 0) {
-        if (_activeSide === "right") setActiveSide("left");
-        else syncPanes();
+        // 右栏没有任何标签 → 自动关闭分屏
+        disable();
         return;
     }
     if (_activeSide === "right") {
@@ -504,6 +508,11 @@ function sendToLeft(idx) {
     renderRightTabs();
     tabsCmd("set-excluded", fp, false);
     _leftPreviewPath = fp;
+    if (_rightTabs.length === 0) {
+        // 右栏清空 → 自动关闭分屏
+        disable();
+        return;
+    }
     setActiveSide("left");
 }
 
@@ -530,11 +539,26 @@ function syncPanes() {
         _els.leftContent.innerHTML = "";
         var fp = _rightActive >= 0 ? _rightTabs[_rightActive].path : null;
         renderPreviewInto(_els.rightContent, fp);
+        restorePreviewScroll(_els.rightContent, fp);
     } else {
         // 编辑器在右栏; 左栏渲染左预览 (邻近标签)
         renderPreviewInto(_els.leftContent, _leftPreviewPath);
         _els.rightContent.innerHTML = "";
+        restorePreviewScroll(_els.leftContent, _leftPreviewPath);
     }
+}
+
+/** 预览渲染后恢复该文件滚动位置 (简单重试防渲染时序) */
+function restorePreviewScroll(container, filePath) {
+    if (!container || !filePath || _scrollState[filePath] === undefined) return;
+    var v = _scrollState[filePath];
+    var tries = 0;
+    (function retry() {
+        if (!container) return;
+        container.scrollTop = v;
+        tries++;
+        if (tries < 3) setTimeout(retry, 150);
+    })();
 }
 
 /* ------------------------------------------------------------------ */
@@ -549,12 +573,79 @@ function doActivate(side) {
 }
 
 /**
+ * 包装 File.recoverPosOrScroll — Typora 在文件加载后调用它恢复光标/滚动
+ * (无参 e=undefined → 光标回顶部)。包装后注入该文件的滚动记录:
+ * Typora 恢复链路一次到位 (光标 + 滚动目标), 无"先顶后跳"中间态、
+ * 无需延迟恢复、无需隐藏编辑器。无记录时不注入 (原行为)。
+ */
+function wrapRecoverPosOrScroll() {
+    if (!File || typeof File.recoverPosOrScroll !== "function" || _origRecover) return;
+    _origRecover = File.recoverPosOrScroll;
+    File.recoverPosOrScroll = function (e) {
+        var injected = false;
+        var target = null;
+        if (e === undefined) {
+            try {
+                var cf = File.bundle && File.bundle.filePath;
+                if (cf && _scrollState[cf] !== undefined) {
+                    target = _scrollState[cf];
+                    e = { scrollOffset: target, timeStamp: Date.now() };
+                    injected = true;
+                }
+            } catch (err) {}
+        }
+        // 必须传注入后的 e — apply(arguments) 传原始参数会丢失注入值
+        var result = _origRecover.call(this, e);
+        // 注入后补设 — 精准时机: 等待"可滚动到目标"条件成立
+        // (scrollHeight ≥ 目标 + 视口高) 再一次性补设。比固定间隔复查
+        // 更精准: 渲染未完成时 scrollTop 被 clamp 无效, 此刻检测的是
+        // 内容高度 (渲染完成的直接条件), 条件成立补设一次必然生效,
+        // 不反复设置 (无多次跳变)
+        if (injected) {
+            var waited = 0;
+            (function wait() {
+                setTimeout(function () {
+                    if (!_active) return;
+                    var content = document.querySelector("content");
+                    if (!content) return;
+                    if (content.scrollTop === target) return;   // 已到位
+                    waited++;
+                    if (content.scrollHeight < target + content.clientHeight && waited < 60) {
+                        wait();   // 渲染未完成 (不可滚动到目标) → 继续等 (≤3s)
+                    } else {
+                        try {
+                            _origRecover.call(File, {
+                                scrollOffset: target,
+                                timeStamp: Date.now()
+                            });
+                        } catch (err2) {}
+                    }
+                }, 50);
+            })();
+        }
+        return result;
+    };
+}
+
+/**
  * 切换活动栏。目标文件 ≠ Typora 当前文件时先 openFile 并挂起,
  * 等 opened 事件确认加载完成再迁移 — 避免贴片带旧内容闪现。
  */
 function setActiveSide(side) {
     if (!_active || side === _activeSide) return;
     if (side === "right" && _rightActive < 0) return;
+
+    // 切换前记录"目标栏预览的可视位置" (跟预览位置语义: 编辑器切过去后
+    // 从预览当前的位置进入, 无论预览滚没滚都以预览为准)
+    if (side === "right" && _activeSide === "left" && _rightActive >= 0) {
+        _scrollState[_rightTabs[_rightActive].path] = _els.rightContent.scrollTop || 0;
+    } else if (side === "left" && _activeSide === "right" && _leftPreviewPath) {
+        _scrollState[_leftPreviewPath] = _els.leftContent.scrollTop || 0;
+    }
+
+    // 离开前记录当前编辑文件滚动位置
+    var curFile = BetterTypora.getCurrentFile();
+    if (curFile && _editorEl) _scrollState[curFile] = _editorEl.scrollTop || 0;
 
     var target = side === "right" ? _rightTabs[_rightActive].path : _leftPreviewPath;
     var cur = BetterTypora.getCurrentFile();
@@ -606,6 +697,7 @@ function enable() {
     syncEditor();
     syncPanes();
     renderRightTabs();
+    wrapRecoverPosOrScroll();
     bindEvents();
 
     _layoutTimer = setInterval(onLayoutTick, 150);
@@ -631,6 +723,7 @@ function disable() {
     _rightActive = -1;
     _closedStack = [];
     _leftPreviewPath = null;
+    _scrollState = {};   // 清空记录, 避免分屏关闭后包装注入旧值
     logger.log("分屏已关闭");
     window.BetterTypora.toast("分屏已关闭", 2000);
 }
@@ -645,6 +738,8 @@ function onFileOpened(data) {
     if (!fp) return;
 
     // 挂起迁移: 目标文件加载完成 → 迁移贴片
+    // 注意: 不能 return — 滚动恢复代码在函数末尾, return 会跳过它
+    // (曾导致带 scrollOffset 的 recoverPosOrScroll 从不执行)
     if (_pendingSide) {
         var targetSide = _pendingSide;
         var want = targetSide === "right"
@@ -653,9 +748,9 @@ function onFileOpened(data) {
         if (want === fp) {
             _pendingSide = null;
             doActivate(targetSide);
-            return;
+        } else {
+            _pendingSide = null;
         }
-        _pendingSide = null;   // 目标不符 → 丢弃挂起
     }
 
     if (_activeSide === "left") {
@@ -666,6 +761,9 @@ function onFileOpened(data) {
             if (idx !== _rightActive) {
                 _rightActive = idx;
                 renderRightTabs();
+                // 预览内容同步到新激活标签 — 否则预览内容与标签脱节
+                // (预览还显示旧文件, 点击切换时编辑器加载新文件 → "跳顶部")
+                syncPanes();
             }
         } else {
             // 左栏标签/外部切换 → 编辑器回左栏 (Typora 已切, 不重复 openFile)
@@ -673,6 +771,9 @@ function onFileOpened(data) {
             doActivate("left");
         }
     }
+
+    // 滚动恢复: 由包装的 recoverPosOrScroll (enable 时安装) 在 Typora
+    // 恢复时注入 scrollOffset — 一次到位, 无需延迟复查
 }
 
 /**
@@ -689,12 +790,32 @@ function onWindowResize() {
 
 function onClickContainer(e) {
     if (!_active) return;
-    // 预览区链接 → 左栏打开目标
-    var a = e.target.closest ? e.target.closest("a[data-bt-link]") : null;
+    // 拦截所有链接: 本地 (data-bt-link) → 左栏打开;
+    // 外链 (http/mailto/ftp) → 系统浏览器 (preventDefault 阻止应用内
+    // 导航 — 否则 Electron 窗口直接导航到外部站点会闪退)
+    var a = e.target.closest ? e.target.closest("a") : null;
     if (a) {
         e.preventDefault();
         e.stopPropagation();
-        openLinkTarget(a.getAttribute("data-bt-link"));
+        var link = a.getAttribute("data-bt-link");
+        if (link) {
+            openLinkTarget(link);
+            return;
+        }
+        var href = a.getAttribute("href") || "";
+        if (/^(https?:|mailto:|ftp:)/i.test(href)) {
+            try {
+                var shell = require("electron").shell;
+                if (shell && typeof shell.openExternal === "function") {
+                    shell.openExternal(href);
+                }
+            } catch (err) {}
+            return;
+        }
+        if (href.charAt(0) === "#") {
+            scrollToAnchor(a, href);
+            return;
+        }
         return;
     }
     // 点击预览空白 → 切换活动栏 (编辑器唤过来)
@@ -705,16 +826,30 @@ function onClickContainer(e) {
     }
 }
 
-function openLinkTarget(rel) {
-    var base = null;
-    if (_activeSide === "right" && _rightActive >= 0) base = _rightTabs[_rightActive].path;
-    else base = _leftPreviewPath;
-    if (!base || !rel) return;
-    var abs = path.resolve(path.dirname(base), rel);
-    // 在左栏打开 (tabs 标签恢复显示)
-    _leftPreviewPath = abs;
+/** 预览链接点击: data-bt-link 已是绝对路径 (renderTo 时解析) → 左栏打开 */
+function openLinkTarget(target) {
+    if (!target) return;
+    _leftPreviewPath = target;
     setActiveSide("left");
-    BetterTypora.openFile(abs);
+    BetterTypora.openFile(target);
+}
+
+/** 锚点链接 (#标题): 在预览容器内按标题文本匹配并平滑滚动
+ *  (Typora 解析器输出的标题无 id, 锚点按文本定位) */
+function scrollToAnchor(a, href) {
+    var container = a.closest ? a.closest(".bt-split-preview") : null;
+    if (!container) return;
+    var hash = href.slice(1);
+    try {
+        hash = decodeURIComponent(hash);
+    } catch (e) {}
+    var headers = container.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    for (var i = 0; i < headers.length; i++) {
+        if ((headers[i].textContent || "").trim() === hash) {
+            headers[i].scrollIntoView({ behavior: "smooth", block: "start" });
+            return;
+        }
+    }
 }
 
 function onDividerMouseDown(e) {
@@ -747,9 +882,30 @@ function bindEvents() {
     _handlers.onWindowResize = onWindowResize;
     _handlers.onClickContainer = onClickContainer;
     _handlers.onDividerMouseDown = onDividerMouseDown;
+    // 编辑器滚动实时记录 — 切换瞬间的采样可能已被 Typora 焦点逻辑重置为 0,
+    // 滚动过程中的值才是真实位置 (recoverPosOrScroll 恢复用)
+    _handlers.onEditorScroll = function () {
+        if (!_active || !_editorEl) return;
+        var cur = BetterTypora.getCurrentFile();
+        if (cur) _scrollState[cur] = _editorEl.scrollTop || 0;
+    };
+    // 预览滚动实时记录 — 切到右栏打开的文件若在预览里滚过, 位置同样恢复
+    _handlers.onLeftScroll = function () {
+        if (_activeSide === "right" && _leftPreviewPath) {
+            _scrollState[_leftPreviewPath] = _els.leftContent.scrollTop || 0;
+        }
+    };
+    _handlers.onRightScroll = function () {
+        if (_activeSide === "left" && _rightActive >= 0) {
+            _scrollState[_rightTabs[_rightActive].path] = _els.rightContent.scrollTop || 0;
+        }
+    };
     window.addEventListener("resize", _handlers.onWindowResize);
     _els.container.addEventListener("click", _handlers.onClickContainer);
     _els.divider.addEventListener("mousedown", _handlers.onDividerMouseDown);
+    _editorEl.addEventListener("scroll", _handlers.onEditorScroll, { passive: true });
+    _els.leftContent.addEventListener("scroll", _handlers.onLeftScroll, { passive: true });
+    _els.rightContent.addEventListener("scroll", _handlers.onRightScroll, { passive: true });
     window.BetterTypora.onFileEvent("opened", _handlers.onFileOpened);
 }
 
@@ -760,6 +916,15 @@ function unbindEvents() {
     }
     if (_els.divider && _handlers.onDividerMouseDown) {
         _els.divider.removeEventListener("mousedown", _handlers.onDividerMouseDown);
+    }
+    if (_editorEl && _handlers.onEditorScroll) {
+        _editorEl.removeEventListener("scroll", _handlers.onEditorScroll);
+    }
+    if (_els.leftContent && _handlers.onLeftScroll) {
+        _els.leftContent.removeEventListener("scroll", _handlers.onLeftScroll);
+    }
+    if (_els.rightContent && _handlers.onRightScroll) {
+        _els.rightContent.removeEventListener("scroll", _handlers.onRightScroll);
     }
     if (_handlers.onFileOpened) {
         window.BetterTypora.offFileEvent("opened", _handlers.onFileOpened);

@@ -1691,11 +1691,47 @@
                 var C = getCtor();
                 if (!C) return null;
                 try {
-                    var r = C.parseFrom(String(md == null ? "" : md));
-                    return Array.isArray(r) ? String(r[0]) : null;
+                    var text = String(md == null ? "" : md);
+                    // 去 BOM (Windows UTF-8 文件头) — 否则 ^--- 正则不匹配
+                    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+                    // front matter (--- 元数据块) 由 Typora 顶层逻辑渲染成
+                    // md-meta-block — parseFrom 是节点解析器不识别它,
+                    // 需先剥离单独渲染, 再解析正文 (参照 typora-community-plugin)
+                    var frontMatter = null;
+                    var content = text;
+                    var m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+                    if (m) {
+                        frontMatter = m[1];
+                        content = text.slice(m[0].length);
+                        // 去前导空行 — parseFrom 对前导 \n 可能返回非数组
+                        content = content.replace(/^\r?\n+/, "");
+                    }
+                    var r = C.parseFrom(content);
+                    if (!Array.isArray(r)) {
+                        _lastError = "parseFrom 非数组返回: " +
+                            (r === null ? "null" : typeof r);
+                        return null;
+                    }
+                    var html = String(r[0]);
+                    if (html === null) return null;
+                    if (frontMatter !== null) {
+                        html = '<pre mdtype="meta_block" class="md-meta-block md-end-block">' +
+                            _btEscapeHtml(frontMatter) + "</pre>" + html;
+                    }
+                    return html;
                 } catch (e) {
                     _lastError = e.message;
                     return null;
+                }
+            }
+
+            /** 解析器输出的路径是 URL 编码 (中文 → %E6...), 需解码;
+             *  文件名本身含 % 时 decode 抛错, 保留原样 */
+            function decodePath(s) {
+                try {
+                    return decodeURIComponent(s);
+                } catch (e) {
+                    return s;
                 }
             }
 
@@ -1717,27 +1753,71 @@
                     edits[i].setAttribute("contenteditable", "false");
                 }
 
-                // 相对图片 → 绝对 file:// (基于 baseDir)
+                // 图片处理: Typora 解析器输出基于"当前文档"的 file:// 绝对
+                // 路径 (非标准格式 file://D:/ + ?lastModify query + Typora
+                // 事件属性)。统一: 去 query → 重映射到预览文档目录 → 标准
+                // file:/// 格式 → 移除 onerror/onload (函数在预览上下文不存在)
                 if (options.baseDir) {
                     var imgs = container.querySelectorAll("img");
                     for (var j = 0; j < imgs.length; j++) {
-                        var src = imgs[j].getAttribute("src");
-                        if (src && !/^(https?:|file:|data:|mailto:|\/\/|#)/i.test(src)) {
-                            try {
-                                imgs[j].src = url.pathToFileURL(
-                                    path.resolve(options.baseDir, src)
+                        var img = imgs[j];
+                        var src = img.getAttribute("src");
+                        if (!src) continue;
+                        var clean = decodePath(src.split(/[?#]/)[0]);   // 去 query + URL 解码
+                        try {
+                            if (/^file:/i.test(clean)) {
+                                var abs = clean.replace(/^file:\/\//i, "");
+                                if (/^[a-zA-Z]:\//.test(abs)) {
+                                    // Windows 盘符: 重映射到预览文档目录
+                                    var cur = _btGetCurrentFile();
+                                    var curDir = cur ? path.dirname(cur) : null;
+                                    var rel = curDir ? path.relative(curDir, abs) : abs;
+                                    img.src = url.pathToFileURL(
+                                        path.resolve(options.baseDir, rel)
+                                    ).href;
+                                } else {
+                                    img.src = clean;
+                                }
+                            } else if (!/^(https?:|data:|mailto:|\/\/|#)/i.test(clean)) {
+                                img.src = url.pathToFileURL(
+                                    path.resolve(options.baseDir, clean)
                                 ).href;
-                            } catch (e) {}
-                        }
+                            } else if (clean !== src) {
+                                img.src = clean;
+                            }
+                        } catch (e) {}
+                        // Typora 事件处理器在预览上下文不存在, 移除避免报错
+                        img.removeAttribute("onerror");
+                        img.removeAttribute("onload");
                     }
                 }
 
-                // 本地 md 链接标记 data-bt-link (点击行为由调用方委托)
+                // 本地链接: 解析目标 (同图片 — Typora 解析器把相对链接输出
+                // 成基于"当前文档"的 file:// 绝对, 需重映射到预览目录) +
+                // 标记 data-bt-link (绝对路径, 点击行为由调用方委托)
                 var links = container.querySelectorAll("a[href]");
                 for (var k = 0; k < links.length; k++) {
                     var href = links[k].getAttribute("href") || "";
-                    if (!/^(https?:|file:|data:|mailto:|\/\/|#)/i.test(href)) {
-                        links[k].setAttribute("data-bt-link", href);
+                    if (/^(https?:|data:|mailto:|\/\/|#)/i.test(href)) continue;
+                    var clean = decodePath(href.split(/[?#]/)[0]);   // 去 query + URL 解码
+                    var target = null;
+                    try {
+                        if (/^file:/i.test(clean)) {
+                            var abs2 = clean.replace(/^file:\/\//i, "");
+                            if (/^[a-zA-Z]:\//.test(abs2)) {
+                                var cur2 = _btGetCurrentFile();
+                                var curDir2 = cur2 ? path.dirname(cur2) : null;
+                                var rel2 = curDir2 ? path.relative(curDir2, abs2) : abs2;
+                                target = path.resolve(options.baseDir, rel2);
+                            } else {
+                                target = abs2;
+                            }
+                        } else if (options.baseDir) {
+                            target = path.resolve(options.baseDir, clean);
+                        }
+                    } catch (e) {}
+                    if (target) {
+                        links[k].setAttribute("data-bt-link", target);
                     }
                 }
 

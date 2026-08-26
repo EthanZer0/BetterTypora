@@ -199,6 +199,27 @@
 }
 #bt-split-container .bt-split-preview .bt-md del { color: var(--text-color, #888); }
 
+/* front matter 元数据块 (BetterTypora.markdown 剥离渲染的 md-meta-block) */
+#bt-split-container .bt-split-preview .md-meta-block {
+    font-family: var(--font-mono, Consolas, "Courier New", monospace);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-color, #666);
+    background: rgba(128, 128, 128, 0.06);
+    border: 1px solid var(--window-border, #ddd);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 0 0 16px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* 隐藏 Typora 图片语法标记 (md-meta: ![alt](src)) — 编辑器里由主题
+ * CSS (#write 前缀) 隐藏, 预览容器不在 #write 内不继承, 需自带 */
+#bt-split-container .bt-split-preview .md-image .md-meta {
+    display: none;
+}
+
 /* ===================================================================
  * CodeMirror 代码高亮 (Typora 同款, 结构样式由全局 codemirror.css 提供)
  * =================================================================== */

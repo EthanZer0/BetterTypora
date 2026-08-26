@@ -1,8 +1,8 @@
 {
   "id": "split-debug",
   "name": "Split Debug",
-  "version": "0.2.0",
-  "description": "分屏编辑器贴片溢出诊断: 贴片/#write/内容宽度与窗口边界对比 (用完即删)",
+  "version": "0.6.0",
+  "description": "滚动恢复诊断: 滚动容器定位 + 恢复时序观测 (用完即删)",
   "author": "BetterTypora",
   "main": "main.js",
   "enabled": true
