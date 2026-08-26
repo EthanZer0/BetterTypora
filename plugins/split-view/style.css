@@ -44,6 +44,10 @@
     flex-direction: column;
     background: var(--bg-color, #ffffff);
     overflow: hidden;
+    /* 整体让出浮动标签栏 (JS 设置 --bt-tabbar-h = 实测高度):
+     * 预览内容区顶边 = 标签栏底边, 与编辑器贴片 top=tabH 对齐。
+     * 不能靠内容区 padding 让位 — 容器顶边仍为 0, 视觉上"没算标签栏" */
+    padding-top: var(--bt-tabbar-h, 32px);
 }
 
 /* 分栏拖拽条 */
@@ -105,114 +109,31 @@
 }
 
 /* ===================================================================
- * 预览区 (marked 渲染) — 左右栏共用
+ * 预览区 (Typora 原生渲染) — 左右栏共用
+ * 语法样式由 installPreviewTheme 注入的主题 CSS 提供 (与编辑器一致),
+ * 此处只保留布局基础 (容器/居中/行高) 与空状态/元数据块/CodeMirror
  * =================================================================== */
 #bt-split-container .bt-split-preview {
     flex: 1;
     overflow: auto;
-    padding: 16px 24px 40px;
+    /* padding 与编辑器写作区一致: JS 同步 #write 实测 padding 到
+       --bt-preview-pad (主题切换时更新); 变量未就绪时兜底 */
+    padding: var(--bt-preview-pad, 16px 24px 40px);
     color: var(--text-color, #333);
-    font-family: var(--font-sans, system-ui, sans-serif);
+    /* font-family 不设 — 继承 body 的主题字体 (显式 var(--font-sans,
+       system-ui) 会挡住主题字体继承, 曾导致预览字体与编辑器不同) */
 }
 #bt-split-container .bt-split-preview .bt-md {
-    max-width: 860px;
-    margin: 0 auto;
-    font-size: 15px;
-    line-height: 1.7;
+    /* 内容宽度与编辑器写作区一致: 不设 max-width/居中 (编辑器 #write
+       全宽), 内容宽 = 容器宽 - 左右 padding, 与编辑器贴片内 #write 相同 */
     word-wrap: break-word;
+    /* line-height 不设 — 继承注入的主题行高 (与编辑器一致),
+       自设 1.7 会覆盖主题行高 */
 }
-#bt-split-container .bt-split-preview .bt-md h1,
-#bt-split-container .bt-split-preview .bt-md h2,
-#bt-split-container .bt-split-preview .bt-md h3,
-#bt-split-container .bt-split-preview .bt-md h4 {
-    color: var(--heading-text-color, var(--text-color, #333));
-    font-weight: 600;
-    margin: 1.2em 0 0.6em;
-    line-height: 1.3;
-}
-#bt-split-container .bt-split-preview .bt-md h1 { font-size: 1.6em; border-bottom: 1px solid var(--window-border, #ddd); padding-bottom: 0.3em; }
-#bt-split-container .bt-split-preview .bt-md h2 { font-size: 1.35em; }
-#bt-split-container .bt-split-preview .bt-md h3 { font-size: 1.15em; }
-#bt-split-container .bt-split-preview .bt-md p { margin: 0.6em 0; }
-#bt-split-container .bt-split-preview .bt-md a {
-    color: var(--active-border-color, #4a90d9);
-    text-decoration: underline;
-    cursor: pointer;
-}
-#bt-split-container .bt-split-preview .bt-md ul,
-#bt-split-container .bt-split-preview .bt-md ol {
-    padding-left: 1.6em;
-    margin: 0.5em 0;
-}
-#bt-split-container .bt-split-preview .bt-md li { margin: 0.2em 0; }
-#bt-split-container .bt-split-preview .bt-md blockquote {
-    margin: 0.8em 0;
-    padding: 0.2em 1em;
-    border-left: 3px solid var(--window-border, #bbb);
-    color: var(--text-color, #555);
-    background: rgba(128, 128, 128, 0.05);
-    border-radius: 0 6px 6px 0;
-}
-#bt-split-container .bt-split-preview .bt-md code {
-    font-family: var(--font-mono, Consolas, "Courier New", monospace);
-    font-size: 0.9em;
-    background: rgba(128, 128, 128, 0.12);
-    border-radius: 3px;
-    padding: 1px 4px;
-}
-#bt-split-container .bt-split-preview .bt-md pre {
-    background: rgba(128, 128, 128, 0.08);
-    border: 1px solid var(--window-border, #ddd);
-    border-radius: 6px;
-    padding: 10px 12px;
-    overflow-x: auto;
-    margin: 0.8em 0;
-}
-#bt-split-container .bt-split-preview .bt-md pre code {
-    background: transparent;
-    padding: 0;
-    font-size: 13px;
-    line-height: 1.5;
-}
-#bt-split-container .bt-split-preview .bt-md table {
-    border-collapse: collapse;
-    margin: 0.8em 0;
-    font-size: 0.95em;
-}
-#bt-split-container .bt-split-preview .bt-md th,
-#bt-split-container .bt-split-preview .bt-md td {
-    border: 1px solid var(--window-border, #ccc);
-    padding: 4px 10px;
-}
-#bt-split-container .bt-split-preview .bt-md th {
-    background: rgba(128, 128, 128, 0.08);
-    font-weight: 600;
-}
-#bt-split-container .bt-split-preview .bt-md img {
-    max-width: 100%;
-    border-radius: 4px;
-}
-#bt-split-container .bt-split-preview .bt-md hr {
-    border: none;
-    border-top: 1px solid var(--window-border, #ddd);
-    margin: 1.2em 0;
-}
-#bt-split-container .bt-split-preview .bt-md del { color: var(--text-color, #888); }
 
-/* front matter 元数据块 (BetterTypora.markdown 剥离渲染的 md-meta-block) */
-#bt-split-container .bt-split-preview .md-meta-block {
-    font-family: var(--font-mono, Consolas, "Courier New", monospace);
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--text-color, #666);
-    background: rgba(128, 128, 128, 0.06);
-    border: 1px solid var(--window-border, #ddd);
-    border-radius: 6px;
-    padding: 8px 12px;
-    margin: 0 0 16px;
-    white-space: pre-wrap;
-    word-break: break-all;
-}
+/* front matter 元数据块 — 不设样式, 由注入的主题规则生效
+   (#write pre.md-meta-block → .bt-split-preview pre.md-meta-block,
+   与编辑器一致); 自设样式特异性更高会盖住主题 */
 
 /* 隐藏 Typora 图片语法标记 (md-meta: ![alt](src)) — 编辑器里由主题
  * CSS (#write 前缀) 隐藏, 预览容器不在 #write 内不继承, 需自带 */
@@ -220,40 +141,32 @@
     display: none;
 }
 
+/* 公式颜色与编辑器一致: JS 同步 #write 实测色到 --bt-math-color。
+ * 预览容器用 --text-color (claude 主题下是侧边栏浅灰 #3d3d3a),
+ * MathJax fill=currentColor 跟随 → 公式偏浅; 只校正公式, 正文不变 */
+#bt-split-container .bt-split-preview mjx-container {
+    color: var(--bt-math-color, currentColor);
+}
+
 /* ===================================================================
  * CodeMirror 代码高亮 (Typora 同款, 结构样式由全局 codemirror.css 提供)
  * =================================================================== */
 #bt-split-container .bt-split-preview pre.md-fences {
-    padding: 0;
     overflow: hidden;
-    line-height: 1.5;
+    /* padding 不设 — 主题的代码块内边距由注入规则提供 (与编辑器一致) */
 }
 #bt-split-container .bt-split-preview .CodeMirror {
     height: auto;
-    font-family: var(--font-mono, Consolas, "Courier New", monospace);
-    font-size: 13px;
-    background: transparent;
-    color: var(--text-color, #333);
+    /* font-family/font-size/color/background 不设 — 继承主题代码块样式
+       (pre.md-fences 注入) 与全局 cm-s-inner 规则, 与编辑器一致;
+       自设 background 会覆盖全局 CM 背景 */
 }
-#bt-split-container .bt-split-preview .CodeMirror-lines {
-    padding: 8px 0;
-}
-#bt-split-container .bt-split-preview .CodeMirror-line {
-    padding: 0 12px;
-}
-/* token 基础配色 (Typora 主题的 .cm-* 通常限定在 #typora-source 内) */
-#bt-split-container .bt-split-preview .cm-keyword { color: #c678dd; }
-#bt-split-container .bt-split-preview .cm-string { color: #98c379; }
-#bt-split-container .bt-split-preview .cm-number { color: #d19a66; }
-#bt-split-container .bt-split-preview .cm-comment { color: #8a919c; font-style: italic; }
-#bt-split-container .bt-split-preview .cm-def { color: #e06c75; }
-#bt-split-container .bt-split-preview .cm-variable { color: #383a42; }
-#bt-split-container .bt-split-preview .cm-property { color: #e45649; }
-#bt-split-container .bt-split-preview .cm-operator { color: #56b6c2; }
-#bt-split-container .bt-split-preview .cm-atom { color: #d19a66; }
-#bt-split-container .bt-split-preview .cm-builtin { color: #e45649; }
-#bt-split-container .bt-split-preview .cm-tag { color: #e45649; }
-#bt-split-container .bt-split-preview .cm-attribute { color: #986801; }
+/* .CodeMirror-lines/.CodeMirror-line 内边距不设 — 继承全局 cm-s-inner
+   规则 (与编辑器代码块一致); 自设 8px/12px 会叠加在主题 pre 内边距上,
+   导致预览 padding 偏大 */
+/* token 配色不设 — 主题的 .cm-s-inner .cm-* 是全局规则, 预览 CodeMirror
+   (theme "inner null-scroll" → cm-s-inner) 自动继承, 与编辑器一致;
+   自设基础色会盖住主题配色 (特异性更高) */
 
 /* 空状态提示 */
 #bt-split-container .bt-split-empty {
@@ -314,10 +227,8 @@
     transition: none !important;
 }
 
-/* 左栏预览顶部让出浮动标签栏 (32px) */
-#bt-split-left-content {
-    padding-top: 48px;
-}
+/* 浮动标签栏 (fixed, top:0) — 左栏容器 padding-top 已整体让位
+ * (--bt-tabbar-h), 内容区从标签栏底边开始, 无需额外 padding */
 
 /* ===================================================================
  * 标签右键菜单 (class 复用 tabs 插件的 .typora-tab-menu 全局样式,

@@ -1838,6 +1838,13 @@
                                     try {
                                         showLineNumbers = !!File.option.showLineNumbersForFence;
                                     } catch (e) {}
+                                    // 与编辑器一致: Typora 默认代码块换行
+                                    // (lineWrapping: !File.option.noLineWrapping),
+                                    // 不换行时才会出现横向滚动条
+                                    var lineWrapping = true;
+                                    try {
+                                        lineWrapping = !File.option.noLineWrapping;
+                                    } catch (e) {}
                                     var cmOpts = {
                                         mode: mode,
                                         readOnly: true,
@@ -1851,7 +1858,7 @@
                                         dragDrop: false,
                                         scrollbarStyle: "null",
                                         lineNumbers: showLineNumbers,
-                                        lineWrapping: false
+                                        lineWrapping: lineWrapping
                                     };
                                     var fakeEditor = {
                                         sourceView: { inSourceMode: false },
@@ -1869,10 +1876,33 @@
                     }
                 } catch (e) {}
 
-                // 公式 (Typora 已加载 MathJax)
+                // 公式: parseFrom 时 MathJax 未就绪的块级公式输出为
+                // math-jax-preprocess (显示 $$ 源码), Typora 的补渲染只查
+                // #write 内, 不覆盖预览容器。不用 typesetPromise — 它只
+                // 处理 mjx-container (源码态不处理), 且占用 MathJax 队列
+                // 会让编辑器 parseFrom 时 isMathJaxReady()=false (公式同样
+                // 变源码)。手动把源码喂给 tex2svgPromise 补渲染
                 try {
-                    if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
-                        window.MathJax.typesetPromise([container]);
+                    if (window.MathJax && typeof window.MathJax.tex2svgPromise === "function") {
+                        var preprocs = container.querySelectorAll(".md-math-block .math-jax-preprocess");
+                        for (var mp = 0; mp < preprocs.length; mp++) {
+                            (function (pre) {
+                                try {
+                                    var tex = (pre.textContent || "")
+                                        .replace(/^\s*\$\$\s*/, "")
+                                        .replace(/\s*\$\$\s*$/, "").trim();
+                                    if (!tex) return;
+                                    MathJax.tex2svgPromise(tex, { display: true })
+                                        .then(function (mjx) {
+                                            if (!pre.parentNode) return;   // 容器已被替换
+                                            pre.innerHTML = "";
+                                            pre.appendChild(mjx);
+                                            pre.classList.add("math-jax-postprocess");
+                                            pre.classList.remove("math-jax-preprocess");
+                                        }).catch(function () {});
+                                } catch (e) {}
+                            })(preprocs[mp]);
+                        }
                     }
                 } catch (e) {}
                 return true;

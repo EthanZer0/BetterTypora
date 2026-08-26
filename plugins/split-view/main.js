@@ -49,6 +49,8 @@ var _layoutTimer = null;
 var _handlers = {};
 var _ctxMenu = null;
 var _ctxTargetIdx = -1;
+var _previewThemeStyle = null;  // 注入的主题预览样式元素
+var _themeUnsub = null;         // theme.onChange 解绑
 
 /* ------------------------------------------------------------------ */
 /* tabs 插件协作 (命令通道)                                               */
@@ -167,6 +169,8 @@ function syncEditor() {
     if (_tabBarEl) {
         _tabBarEl.style.setProperty("--bt-tabbar-left", _sidebarRight + "px");
         _tabBarEl.style.setProperty("--bt-tabbar-width", _els.left.offsetWidth + "px");
+        // 左栏容器让位高度 = 标签栏实测高度 (与贴片 top=tabH 对齐)
+        _els.left.style.setProperty("--bt-tabbar-h", _tabBarEl.offsetHeight + "px");
     }
 }
 
@@ -185,6 +189,7 @@ function onLayoutTick() {
     }
     // 编辑器滚动持续恢复已移除 (滚动同步方案放弃)
 
+    syncPreviewSbw();
     updateDirty();
 }
 
@@ -471,6 +476,173 @@ function reopenRightClosed() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 预览主题样式注入 — 预览与编辑器共享主题语法样式                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 注入白名单 — 只注入语法属性 (颜色/字体/背景/边框/字号/行高/文本样式),
+ * 布局属性 (width/flex/align-self/margin/padding 等) 一律过滤。
+ * 黑名单会漏 (曾漏掉 align-self 之类导致 rightContent 不被 stretch,
+ * 被压成 48px 竖线), 白名单彻底杜绝。
+ */
+var SYNTAX_WHITELIST = /^(color|background|background-color|background-image|background-size|background-position|background-repeat|font|font-family|font-size|font-weight|font-style|font-variant|line-height|letter-spacing|word-spacing|text-align|text-decoration|text-decoration-color|text-decoration-line|text-decoration-style|text-transform|text-indent|text-shadow|white-space|word-break|word-wrap|border|border-color|border-style|border-width|border-top|border-right|border-bottom|border-left|border-top-color|border-right-color|border-bottom-color|border-left-color|border-top-style|border-right-style|border-bottom-style|border-left-style|border-top-width|border-right-width|border-bottom-width|border-left-width|border-radius|border-collapse|outline|outline-color|outline-style|outline-width|box-shadow|opacity|list-style|list-style-type|list-style-position|list-style-image|cursor|quotes|content)$/i;
+
+function filterLayoutProps(style, allowPad) {
+    var out = [];
+    try {
+        for (var i = 0; i < style.length; i++) {
+            var prop = style[i];
+            if (SYNTAX_WHITELIST.test(prop)) {
+                out.push(prop + ":" + style.getPropertyValue(prop));
+            } else if (allowPad && /^padding/.test(prop)) {
+                // 块级语法元素 (meta-block/fences/blockquote/table) 的内边距
+                // 是排版语法, 放行; 不影响栏布局
+                out.push(prop + ":" + style.getPropertyValue(prop));
+            }
+        }
+    } catch (e) {}
+    return out.join(";");
+}
+
+/**
+ * 通过 CSSOM 读取当前主题样式表 (#theme_css), 把含 #write 的选择器
+ * 复制一份 .bt-split-preview 版 (如 `#write h1` → 追加 `.bt-split-preview h1`),
+ * 重建 CSS 注入 <style>。预览容器不在 #write 内, 主题样式原本不生效
+ * (只有基础样式, 寡淡) — 注入后语法样式与编辑器一致。支持 @media 递归。
+ * 主题切换时 (theme.onChange) 重新注入。
+ */
+function installPreviewTheme() {
+    removePreviewTheme();
+    try {
+        function rewriteRules(rules, out) {
+            for (var i = 0; i < rules.length; i++) {
+                var r = rules[i];
+                if (r.selectorText && r.style && r.selectorText.indexOf("#write") >= 0) {
+                    // 块级语法元素 (meta-block/fences/blockquote/table/figure)
+                    // 与容器自身 (#write 单独规则, 写作区内边距) 的 padding
+                    // 放行 — 排版语法, 且 padding 是内部属性不影响栏布局
+                    var allowPad = /pre\.md-|blockquote|table|figure/.test(r.selectorText);
+                    if (!allowPad) {
+                        var parts2 = r.selectorText.split(",");
+                        for (var k = 0; k < parts2.length; k++) {
+                            if (parts2[k].trim() === "#write") { allowPad = true; break; }
+                        }
+                    }
+                    var css = filterLayoutProps(r.style, allowPad);
+                    if (!css) continue;
+                    var parts = r.selectorText.split(",");
+                    var extra = [];
+                    for (var j = 0; j < parts.length; j++) {
+                        if (parts[j].indexOf("#write") >= 0) {
+                            extra.push(parts[j].replace(/#write/g, ".bt-split-preview"));
+                        }
+                    }
+                    if (extra.length) {
+                        out.push(r.selectorText + ", " + extra.join(", ") +
+                            " {" + css + "}");
+                    }
+                } else if (r.cssRules) {
+                    // @media: 递归处理内部规则
+                    var inner = [];
+                    rewriteRules(r.cssRules, inner);
+                    if (inner.length) {
+                        out.push("@media " + r.media.mediaText + " {\n" +
+                            inner.join("\n") + "\n}");
+                    }
+                }
+            }
+        }
+
+        var out = [];
+        // 遍历所有样式表 (base.css 基础 + 当前主题, 按 DOM 顺序叠加 —
+        // 与编辑器一致)。跨域 sheet (如 typora-bg://) cssRules 访问抛错,
+        // 单独跳过; 错误不能冒泡 (曾导致整个注入失败)
+        var sheets = document.styleSheets;
+        for (var si = 0; si < sheets.length; si++) {
+            var sheet = sheets[si];
+            if (!sheet) continue;
+            if (sheet.ownerNode && sheet.ownerNode.id === "bt-preview-theme") continue;
+            var rules = null;
+            try {
+                rules = sheet.cssRules;
+            } catch (e) {
+                continue;   // 跨域 sheet 跳过
+            }
+            if (!rules) continue;
+            try {
+                rewriteRules(rules, out);
+            } catch (e) {}
+        }
+        if (!out.length) return;
+
+        var style = document.createElement("style");
+        style.id = "bt-preview-theme";
+        style.textContent = out.join("\n");
+        document.head.appendChild(style);
+        _previewThemeStyle = style;
+        logger.log("预览主题样式注入: " + out.length + " 条规则");
+    } catch (e) {
+        logger.log("预览主题注入失败: " + e.message);
+    }
+}
+
+function removePreviewTheme() {
+    if (_previewThemeStyle) {
+        if (_previewThemeStyle.parentNode) {
+            _previewThemeStyle.parentNode.removeChild(_previewThemeStyle);
+        }
+        _previewThemeStyle = null;
+    }}
+
+/** 预览容器 padding 与编辑器写作区 (#write) 对齐: 实测 computed padding
+ * 写入容器 CSS 变量。写作区 padding 由主题提供 (如 30px 30px 100px 30px),
+ * 基础规则 `16px 24px 40px` 特异性更高会盖住注入的主题 padding — 直接
+ * 同步实测值, 与编辑器严格一致。同时读取 #write 文字色给预览公式
+ * (mjx-container) — 预览容器用 --text-color (claude 主题下是侧边栏
+ * 浅灰 #3d3d3a), MathJax fill=currentColor 跟随 → 公式偏浅; 只校正
+ * 公式颜色, 正文文字保持预览容器色 */
+function syncPreviewPadding() {
+    if (!_els.container) return;
+    var pad = null;
+    var mcolor = null;
+    try {
+        var writeEl = document.querySelector("#write");
+        if (writeEl) {
+            var cs = getComputedStyle(writeEl);
+            pad = cs.padding;
+            mcolor = cs.color;
+        }
+    } catch (e) {}
+    if (pad) _els.container.style.setProperty("--bt-preview-pad", pad);
+    else _els.container.style.removeProperty("--bt-preview-pad");
+    if (mcolor) _els.container.style.setProperty("--bt-math-color", mcolor);
+    else _els.container.style.removeProperty("--bt-math-color");
+}
+
+var _lastSbw = -1;
+
+/** 预览容器滚动条占宽补偿: Typora 编辑器 #write 内容区宽 = 滚动容器
+ * offsetWidth - padding (滚动条不占写作区宽, 实测 #write clientW ==
+ * content offsetW), 预览容器滚动条占 clientWidth → 行宽窄一个滚动条宽。
+ * 实测滚动条宽 (offsetW - clientW), 从 padding-right 扣除, 行宽与编辑器一致 */
+function syncPreviewSbw() {
+    if (!_active) return;
+    var list = [_els.leftContent, _els.rightContent];
+    for (var i = 0; i < list.length; i++) {
+        var el = list[i];
+        if (!el) continue;
+        var sbw = el.offsetWidth - el.clientWidth;
+        if (sbw < 0) sbw = 0;
+        if (el.__btSbw === sbw) continue;   // 无变化跳过 (避免重排)
+        el.__btSbw = sbw;
+        el.style.paddingRight = "";          // 恢复主题 padding-right
+        var pr = 0;
+        try { pr = parseFloat(getComputedStyle(el).paddingRight) || 0; } catch (e) {}
+        el.style.paddingRight = Math.max(0, pr - sbw) + "px";
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* 发送 (Tabs 协作)                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -568,6 +740,20 @@ function doActivate(side) {
     // 活动栏切换: 贴片瞬移 (无过渡)
     syncEditor();
     syncPanes();
+    // Typora 加载后的自动补渲染 renderUnder(document) 会查询全文档公式块,
+    // 预览容器公式块 (被 syncPanes 清空/重建) 会触发 A 的 contains 检查
+    // 失败 → 批量渲染中断 → 编辑器公式停在源码态。手动限定 #write 范围
+    // 补渲染 (false = 只处理未渲染的公式块, 已渲染的不受影响)
+    setTimeout(function () {
+        if (!_active) return;
+        try {
+            var mb = File.editor.mathBlock;
+            var writeEl = document.querySelector("#write");
+            if (mb && writeEl && typeof mb.renderUnder === "function") {
+                mb.renderUnder(writeEl, false);
+            }
+        } catch (e) {}
+    }, 100);
 }
 
 /**
@@ -636,11 +822,21 @@ function enable() {
     _activeSide = "left";
     _pendingSide = null;
 
+    // 首次预览渲染前就位: 公式色/padding 变量 (MathJax fill 在渲染时
+    // 固化, 变量后置会让首次渲染的公式固化浅色, 之后改 CSS 不变色)
+    syncPreviewPadding();
     measureLayout();
     syncEditor();
     syncPanes();
     renderRightTabs();
     window.BetterTypora.scroll.installAutoRestore();
+    installPreviewTheme();
+    _themeUnsub = window.BetterTypora.theme.onChange(function () {
+        installPreviewTheme();
+        syncPreviewPadding();
+        // 主题切换后重渲染预览: 公式 fill 固化渲染时的颜色
+        syncPanes();
+    });
     bindEvents();
 
     _layoutTimer = setInterval(onLayoutTick, 150);
@@ -667,6 +863,8 @@ function disable() {
     _closedStack = [];
     _leftPreviewPath = null;
     window.BetterTypora.scroll.clear();   // 清空记录, 避免分屏关闭后注入旧值
+    removePreviewTheme();
+    if (_themeUnsub) { _themeUnsub(); _themeUnsub = null; }
     logger.log("分屏已关闭");
     window.BetterTypora.toast("分屏已关闭", 2000);
 }
