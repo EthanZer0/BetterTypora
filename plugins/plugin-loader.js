@@ -1886,6 +1886,88 @@
             };
         })();
 
+        // =================================================================
+        // 滚动状态服务 (BetterTypora.scroll)
+        // 按文件记录滚动位置 + 安装自动恢复: 包装 File.recoverPosOrScroll,
+        // Typora 恢复时注入 scrollOffset (渲染未完成时 scrollHeight 不足,
+        // scrollTop 被 clamp — 等待"可滚动到目标"条件成立后一次性补设)。
+        // 记录由调用方 (如 split-view) 监听滚动并 record();
+        // 调用方结束使用时 clear() 清空 → 包装不注入 (Typora 原行为)。
+        // =================================================================
+        var scrollService = (function () {
+            var _state = {};         // filePath → scrollTop
+            var _origRecover = null; // 原始 File.recoverPosOrScroll
+            var _installed = false;
+
+            function record(filePath, value) {
+                if (!filePath) return;
+                _state[filePath] = value || 0;
+            }
+
+            function get(filePath) {
+                return _state[filePath];
+            }
+
+            function clear() {
+                _state = {};
+            }
+
+            /** 安装自动恢复 (幂等) */
+            function installAutoRestore() {
+                if (_installed) return;
+                _installed = true;
+                if (!File || typeof File.recoverPosOrScroll !== "function") return;
+                _origRecover = File.recoverPosOrScroll;
+                File.recoverPosOrScroll = function (e) {
+                    var injected = false;
+                    var target = null;
+                    if (e === undefined) {
+                        try {
+                            var cf = File.bundle && File.bundle.filePath;
+                            if (cf && _state[cf] !== undefined) {
+                                target = _state[cf];
+                                e = { scrollOffset: target, timeStamp: Date.now() };
+                                injected = true;
+                            }
+                        } catch (err) {}
+                    }
+                    // 必须传注入后的 e — apply(arguments) 会丢失注入值
+                    var result = _origRecover.call(this, e);
+                    if (injected) {
+                        var waited = 0;
+                        (function wait() {
+                            setTimeout(function () {
+                                var content = document.querySelector("content");
+                                if (!content) return;
+                                if (content.scrollTop === target) return;
+                                waited++;
+                                if (content.scrollHeight < target + content.clientHeight &&
+                                        waited < 60) {
+                                    wait();
+                                } else {
+                                    try {
+                                        _origRecover.call(File, {
+                                            scrollOffset: target,
+                                            timeStamp: Date.now()
+                                        });
+                                    } catch (err2) {}
+                                }
+                            }, 50);
+                        })();
+                    }
+                    return result;
+                };
+            }
+
+            return {
+                record: record,
+                get: get,
+                clear: clear,
+                installAutoRestore: installAutoRestore,
+                isInstalled: function () { return _installed; }
+            };
+        })();
+
         // 暴露全局 API
         window.BetterTypora = {
             events: eventBus,
@@ -1896,6 +1978,7 @@
             plugins: pluginManager._plugins,
             theme: themeService,
             markdown: markdownService,
+            scroll: scrollService,
 
             // 快捷方法
             getPlugin: function (id) { return pluginManager.get(id); },

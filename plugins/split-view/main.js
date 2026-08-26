@@ -49,8 +49,6 @@ var _layoutTimer = null;
 var _handlers = {};
 var _ctxMenu = null;
 var _ctxTargetIdx = -1;
-var _scrollState = {};       // filePath → scrollTop (切换时保存, recoverPosOrScroll 恢复)
-var _origRecover = null;     // 原始 File.recoverPosOrScroll (包装用)
 
 /* ------------------------------------------------------------------ */
 /* tabs 插件协作 (命令通道)                                               */
@@ -550,8 +548,8 @@ function syncPanes() {
 
 /** 预览渲染后恢复该文件滚动位置 (简单重试防渲染时序) */
 function restorePreviewScroll(container, filePath) {
-    if (!container || !filePath || _scrollState[filePath] === undefined) return;
-    var v = _scrollState[filePath];
+    if (!container || !filePath || window.BetterTypora.scroll.get(filePath) === undefined) return;
+    var v = window.BetterTypora.scroll.get(filePath);
     var tries = 0;
     (function retry() {
         if (!container) return;
@@ -573,61 +571,6 @@ function doActivate(side) {
 }
 
 /**
- * 包装 File.recoverPosOrScroll — Typora 在文件加载后调用它恢复光标/滚动
- * (无参 e=undefined → 光标回顶部)。包装后注入该文件的滚动记录:
- * Typora 恢复链路一次到位 (光标 + 滚动目标), 无"先顶后跳"中间态、
- * 无需延迟恢复、无需隐藏编辑器。无记录时不注入 (原行为)。
- */
-function wrapRecoverPosOrScroll() {
-    if (!File || typeof File.recoverPosOrScroll !== "function" || _origRecover) return;
-    _origRecover = File.recoverPosOrScroll;
-    File.recoverPosOrScroll = function (e) {
-        var injected = false;
-        var target = null;
-        if (e === undefined) {
-            try {
-                var cf = File.bundle && File.bundle.filePath;
-                if (cf && _scrollState[cf] !== undefined) {
-                    target = _scrollState[cf];
-                    e = { scrollOffset: target, timeStamp: Date.now() };
-                    injected = true;
-                }
-            } catch (err) {}
-        }
-        // 必须传注入后的 e — apply(arguments) 传原始参数会丢失注入值
-        var result = _origRecover.call(this, e);
-        // 注入后补设 — 精准时机: 等待"可滚动到目标"条件成立
-        // (scrollHeight ≥ 目标 + 视口高) 再一次性补设。比固定间隔复查
-        // 更精准: 渲染未完成时 scrollTop 被 clamp 无效, 此刻检测的是
-        // 内容高度 (渲染完成的直接条件), 条件成立补设一次必然生效,
-        // 不反复设置 (无多次跳变)
-        if (injected) {
-            var waited = 0;
-            (function wait() {
-                setTimeout(function () {
-                    if (!_active) return;
-                    var content = document.querySelector("content");
-                    if (!content) return;
-                    if (content.scrollTop === target) return;   // 已到位
-                    waited++;
-                    if (content.scrollHeight < target + content.clientHeight && waited < 60) {
-                        wait();   // 渲染未完成 (不可滚动到目标) → 继续等 (≤3s)
-                    } else {
-                        try {
-                            _origRecover.call(File, {
-                                scrollOffset: target,
-                                timeStamp: Date.now()
-                            });
-                        } catch (err2) {}
-                    }
-                }, 50);
-            })();
-        }
-        return result;
-    };
-}
-
-/**
  * 切换活动栏。目标文件 ≠ Typora 当前文件时先 openFile 并挂起,
  * 等 opened 事件确认加载完成再迁移 — 避免贴片带旧内容闪现。
  */
@@ -638,14 +581,14 @@ function setActiveSide(side) {
     // 切换前记录"目标栏预览的可视位置" (跟预览位置语义: 编辑器切过去后
     // 从预览当前的位置进入, 无论预览滚没滚都以预览为准)
     if (side === "right" && _activeSide === "left" && _rightActive >= 0) {
-        _scrollState[_rightTabs[_rightActive].path] = _els.rightContent.scrollTop || 0;
+        window.BetterTypora.scroll.record(_rightTabs[_rightActive].path, _els.rightContent.scrollTop || 0);
     } else if (side === "left" && _activeSide === "right" && _leftPreviewPath) {
-        _scrollState[_leftPreviewPath] = _els.leftContent.scrollTop || 0;
+        window.BetterTypora.scroll.record(_leftPreviewPath, _els.leftContent.scrollTop || 0);
     }
 
     // 离开前记录当前编辑文件滚动位置
     var curFile = BetterTypora.getCurrentFile();
-    if (curFile && _editorEl) _scrollState[curFile] = _editorEl.scrollTop || 0;
+    if (curFile && _editorEl) window.BetterTypora.scroll.record(curFile, _editorEl.scrollTop || 0);
 
     var target = side === "right" ? _rightTabs[_rightActive].path : _leftPreviewPath;
     var cur = BetterTypora.getCurrentFile();
@@ -697,7 +640,7 @@ function enable() {
     syncEditor();
     syncPanes();
     renderRightTabs();
-    wrapRecoverPosOrScroll();
+    window.BetterTypora.scroll.installAutoRestore();
     bindEvents();
 
     _layoutTimer = setInterval(onLayoutTick, 150);
@@ -723,7 +666,7 @@ function disable() {
     _rightActive = -1;
     _closedStack = [];
     _leftPreviewPath = null;
-    _scrollState = {};   // 清空记录, 避免分屏关闭后包装注入旧值
+    window.BetterTypora.scroll.clear();   // 清空记录, 避免分屏关闭后注入旧值
     logger.log("分屏已关闭");
     window.BetterTypora.toast("分屏已关闭", 2000);
 }
@@ -887,17 +830,17 @@ function bindEvents() {
     _handlers.onEditorScroll = function () {
         if (!_active || !_editorEl) return;
         var cur = BetterTypora.getCurrentFile();
-        if (cur) _scrollState[cur] = _editorEl.scrollTop || 0;
+        if (cur) window.BetterTypora.scroll.record(cur, _editorEl.scrollTop || 0);
     };
     // 预览滚动实时记录 — 切到右栏打开的文件若在预览里滚过, 位置同样恢复
     _handlers.onLeftScroll = function () {
         if (_activeSide === "right" && _leftPreviewPath) {
-            _scrollState[_leftPreviewPath] = _els.leftContent.scrollTop || 0;
+            window.BetterTypora.scroll.record(_leftPreviewPath, _els.leftContent.scrollTop || 0);
         }
     };
     _handlers.onRightScroll = function () {
         if (_activeSide === "left" && _rightActive >= 0) {
-            _scrollState[_rightTabs[_rightActive].path] = _els.rightContent.scrollTop || 0;
+            window.BetterTypora.scroll.record(_rightTabs[_rightActive].path, _els.rightContent.scrollTop || 0);
         }
     };
     window.addEventListener("resize", _handlers.onWindowResize);
