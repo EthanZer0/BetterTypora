@@ -1,0 +1,14 @@
+{
+  "id": "memory-manager",
+  "name": "Memory Manager",
+  "version": "2.0.0",
+  "description": "内存优化器: 空闲时自动强制GC收缩JS堆 + 清理webview缓存, 手动命令立即整理 (无UI)",
+  "author": "BetterTypora",
+  "main": "main.js",
+  "enabled": true,
+  "settings": {
+    "optimizeIntervalMinutes": 15,
+    "optimizeIdleMinutes": 5,
+    "trimIntervalMinutes": 30
+  }
+}
