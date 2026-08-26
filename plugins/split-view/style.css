@@ -1,0 +1,304 @@
+/* ===================================================================
+ * 分屏插件 — 布局样式
+ * 全部使用 Typora CSS 变量 + fallback 链 (附录 A 规范), 自适应深浅主题
+ * =================================================================== */
+
+/* 分屏容器 — 覆盖编辑区 (侧边栏右侧起), 容器本身不拦截事件
+ * 无过渡动画 (布局全部瞬移; 侧边栏动画期间由 transitionrun 即时同步) */
+#bt-split-container {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 50;
+    display: flex;
+    pointer-events: none;
+}
+
+/* 侧边栏提升到分屏元素之上 — 容器/贴片 (z 50/60) 在检测到布局变化前
+ * 可能覆盖侧边栏区域 (0~239), 侧边栏滑入动画会被盖住 (展开"抽搐") */
+#typora-sidebar {
+    z-index: 70 !important;
+}
+
+/* 侧边栏隐藏距离优化: Typora 原生 left:-30000px 让滑入动画 99.4%
+ * 的行程在屏幕外进行 (可视区只有最后 ~2ms), 视觉上"footer 先缓动、
+ * 面板最后瞬间弹出"。仅覆盖收起状态 (展开时 left:0 由 Typora 规则
+ * 生效 — 不能全局覆盖 id+!important 会连展开规则一起压掉):
+ *   left: calc(-1 * var(--sidebar-width)) — 相对自身宽度 (fixed 元素
+ *   的 % 相对视口, 不可用), 滑入/滑出全程在屏幕边缘, 与 footer 同步。
+ * transitionstart → resize 广播保留, 布局同步不受影响。全局生效 */
+#typora-sidebar:not(.open) {
+    left: calc(-1 * var(--sidebar-width, 192px)) !important;
+}
+#bt-split-container > * {
+    pointer-events: auto;
+}
+
+/* 左栏 (标签条 + 内容区) — 宽度由 JS 像素控制 (内联 style.width),
+ * flex-basis 用 auto, 避免百分比 basis 与右栏 grow/shrink 组合的歧义 */
+#bt-split-container .bt-split-left {
+    flex: 0 0 auto;
+    width: 55%;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-color, #ffffff);
+    overflow: hidden;
+}
+
+/* 分栏拖拽条 */
+#bt-split-container .bt-split-divider {
+    flex: 0 0 4px;
+    cursor: col-resize;
+    background: var(--window-border, #ddd);
+    transition: background 0.15s ease;
+}
+#bt-split-container .bt-split-divider:hover,
+#bt-split-container .bt-split-divider.dragging {
+    background: var(--active-border-color, #4a90d9);
+}
+
+/* 右栏 — 标签条 + 内容区 */
+#bt-split-container .bt-split-right {
+    flex: 1;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-color, #ffffff);
+    border-left: 1px solid var(--window-border, #ddd);
+    overflow: hidden;
+}
+/* 栏内容区 — 必须 flex:1 + min-height:0 才能撑满 (否则高度=内容高,
+ * 空内容时高度 0, 编辑器贴片测量会得到 0 高 → 全部空白。教训) */
+#bt-split-container .bt-split-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* ===================================================================
+ * 右栏标签条容器 (chip 样式复用 tabs 插件的全局 .typora-tab-chip,
+ * 继承属性对齐 #typora-tab-bar, 保证观感一致)
+ * =================================================================== */
+#bt-split-container .bt-split-tabs {
+    flex: 0 0 auto;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+    font-size: 12px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--window-border, #ddd);
+    background: var(--side-bar-bg-color, var(--bg-color));
+}
+#bt-split-container .bt-split-tabs::-webkit-scrollbar {
+    height: 2px;
+}
+#bt-split-container .bt-split-tabs::-webkit-scrollbar-thumb {
+    background: var(--window-border, #ddd);
+    border-radius: 1px;
+}
+
+/* ===================================================================
+ * 预览区 (marked 渲染) — 左右栏共用
+ * =================================================================== */
+#bt-split-container .bt-split-preview {
+    flex: 1;
+    overflow: auto;
+    padding: 16px 24px 40px;
+    color: var(--text-color, #333);
+    font-family: var(--font-sans, system-ui, sans-serif);
+}
+#bt-split-container .bt-split-preview .bt-md {
+    max-width: 860px;
+    margin: 0 auto;
+    font-size: 15px;
+    line-height: 1.7;
+    word-wrap: break-word;
+}
+#bt-split-container .bt-split-preview .bt-md h1,
+#bt-split-container .bt-split-preview .bt-md h2,
+#bt-split-container .bt-split-preview .bt-md h3,
+#bt-split-container .bt-split-preview .bt-md h4 {
+    color: var(--heading-text-color, var(--text-color, #333));
+    font-weight: 600;
+    margin: 1.2em 0 0.6em;
+    line-height: 1.3;
+}
+#bt-split-container .bt-split-preview .bt-md h1 { font-size: 1.6em; border-bottom: 1px solid var(--window-border, #ddd); padding-bottom: 0.3em; }
+#bt-split-container .bt-split-preview .bt-md h2 { font-size: 1.35em; }
+#bt-split-container .bt-split-preview .bt-md h3 { font-size: 1.15em; }
+#bt-split-container .bt-split-preview .bt-md p { margin: 0.6em 0; }
+#bt-split-container .bt-split-preview .bt-md a {
+    color: var(--active-border-color, #4a90d9);
+    text-decoration: underline;
+    cursor: pointer;
+}
+#bt-split-container .bt-split-preview .bt-md ul,
+#bt-split-container .bt-split-preview .bt-md ol {
+    padding-left: 1.6em;
+    margin: 0.5em 0;
+}
+#bt-split-container .bt-split-preview .bt-md li { margin: 0.2em 0; }
+#bt-split-container .bt-split-preview .bt-md blockquote {
+    margin: 0.8em 0;
+    padding: 0.2em 1em;
+    border-left: 3px solid var(--window-border, #bbb);
+    color: var(--text-color, #555);
+    background: rgba(128, 128, 128, 0.05);
+    border-radius: 0 6px 6px 0;
+}
+#bt-split-container .bt-split-preview .bt-md code {
+    font-family: var(--font-mono, Consolas, "Courier New", monospace);
+    font-size: 0.9em;
+    background: rgba(128, 128, 128, 0.12);
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+#bt-split-container .bt-split-preview .bt-md pre {
+    background: rgba(128, 128, 128, 0.08);
+    border: 1px solid var(--window-border, #ddd);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    margin: 0.8em 0;
+}
+#bt-split-container .bt-split-preview .bt-md pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+#bt-split-container .bt-split-preview .bt-md table {
+    border-collapse: collapse;
+    margin: 0.8em 0;
+    font-size: 0.95em;
+}
+#bt-split-container .bt-split-preview .bt-md th,
+#bt-split-container .bt-split-preview .bt-md td {
+    border: 1px solid var(--window-border, #ccc);
+    padding: 4px 10px;
+}
+#bt-split-container .bt-split-preview .bt-md th {
+    background: rgba(128, 128, 128, 0.08);
+    font-weight: 600;
+}
+#bt-split-container .bt-split-preview .bt-md img {
+    max-width: 100%;
+    border-radius: 4px;
+}
+#bt-split-container .bt-split-preview .bt-md hr {
+    border: none;
+    border-top: 1px solid var(--window-border, #ddd);
+    margin: 1.2em 0;
+}
+#bt-split-container .bt-split-preview .bt-md del { color: var(--text-color, #888); }
+
+/* ===================================================================
+ * CodeMirror 代码高亮 (Typora 同款, 结构样式由全局 codemirror.css 提供)
+ * =================================================================== */
+#bt-split-container .bt-split-preview pre.md-fences {
+    padding: 0;
+    overflow: hidden;
+    line-height: 1.5;
+}
+#bt-split-container .bt-split-preview .CodeMirror {
+    height: auto;
+    font-family: var(--font-mono, Consolas, "Courier New", monospace);
+    font-size: 13px;
+    background: transparent;
+    color: var(--text-color, #333);
+}
+#bt-split-container .bt-split-preview .CodeMirror-lines {
+    padding: 8px 0;
+}
+#bt-split-container .bt-split-preview .CodeMirror-line {
+    padding: 0 12px;
+}
+/* token 基础配色 (Typora 主题的 .cm-* 通常限定在 #typora-source 内) */
+#bt-split-container .bt-split-preview .cm-keyword { color: #c678dd; }
+#bt-split-container .bt-split-preview .cm-string { color: #98c379; }
+#bt-split-container .bt-split-preview .cm-number { color: #d19a66; }
+#bt-split-container .bt-split-preview .cm-comment { color: #8a919c; font-style: italic; }
+#bt-split-container .bt-split-preview .cm-def { color: #e06c75; }
+#bt-split-container .bt-split-preview .cm-variable { color: #383a42; }
+#bt-split-container .bt-split-preview .cm-property { color: #e45649; }
+#bt-split-container .bt-split-preview .cm-operator { color: #56b6c2; }
+#bt-split-container .bt-split-preview .cm-atom { color: #d19a66; }
+#bt-split-container .bt-split-preview .cm-builtin { color: #e45649; }
+#bt-split-container .bt-split-preview .cm-tag { color: #e45649; }
+#bt-split-container .bt-split-preview .cm-attribute { color: #986801; }
+
+/* 空状态提示 */
+#bt-split-container .bt-split-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-color, #888);
+    font-size: 13px;
+    user-select: none;
+}
+
+/* ===================================================================
+ * 编辑器贴片 — Typora 原生编辑器 fixed 定位到活动栏
+ * =================================================================== */
+.bt-editor-fixed {
+    position: fixed !important;
+    top: var(--bt-editor-top, 0) !important;
+    left: var(--bt-editor-left, 0) !important;
+    width: var(--bt-editor-width, 100%) !important;
+    height: var(--bt-editor-height, 100%) !important;
+    z-index: 60;
+    margin: 0 !important;
+    /* 无过渡 (布局全部瞬移) */
+    transition: none !important;
+    animation: none !important;
+    /* 防御: Typora 布局动画 (侧边栏折叠等) 可能对容器施加 transform,
+     * 会改变 fixed 定位基准导致贴片错位 */
+    transform: none !important;
+}
+.bt-editor-fixed * {
+    transition: none !important;
+    animation: none !important;
+}
+
+/* 分屏贴片内块级内容收窄到 content 区。
+ * Typora 原生: 块宽 = #write 宽 (576.5), 起点在 content 左缘 (+30 padding)
+ * → 块右侧超出右 padding 30px。全宽时写作区居中无感知; 分屏窄容器下
+ * #write 贴窗口右缘 → 块超出窗口 30px (诊断: 块右缘 1320 > 窗口 1290)。
+ * 块宽 = 100% (content 宽, calc(100%-60px) 是双重收窄 — 100% 基准已
+ * 不含 padding) → 块右缘对齐 content 右缘, 左右 padding 对称。 */
+.bt-editor-fixed #write > * {
+    width: 100% !important;
+}
+
+/* 分屏激活时 Typora 标签栏浮动到左栏顶部 (保留 tabs 插件全部能力,
+ * 编辑器贴片移动时标签栏不跟随 — 贴片区从标签栏下方开始)。
+ * left/width 过渡与侧边栏动画同步 (不能 none: 否则侧边栏收起时
+ * 标签栏瞬移, 与平滑的容器/编辑器错位) */
+.bt-tabbar-floating {
+    position: fixed !important;
+    top: 0 !important;
+    left: var(--bt-tabbar-left, 239px) !important;
+    width: var(--bt-tabbar-width, 500px) !important;
+    z-index: 65 !important;
+    margin: 0 !important;
+    /* 无过渡 (布局全部瞬移) */
+    transition: none !important;
+}
+
+/* 左栏预览顶部让出浮动标签栏 (32px) */
+#bt-split-left-content {
+    padding-top: 48px;
+}
+
+/* ===================================================================
+ * 标签右键菜单 (class 复用 tabs 插件的 .typora-tab-menu 全局样式,
+ * 此处无需额外规则)
+ * =================================================================== */

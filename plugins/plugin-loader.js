@@ -33,6 +33,7 @@
 
     var fs = reqnode("fs");
     var path = reqnode("path");
+    var url = reqnode("url");
     var Module = reqnode("module");
 
     // 插件根目录: resources/plugins/
@@ -1653,6 +1654,158 @@
         // 主题特征服务 (BetterTypora.theme): isDark/getSidebarTabsMode/getSidebarTabSlots/onChange
         var themeService = new ThemeService();
 
+        // =================================================================
+        // Markdown 渲染服务 (BetterTypora.markdown)
+        // 复用 Typora 内部解析器 (nodeMap 节点类的静态 parseFrom), 产出与
+        // 编辑器完全一致的 DOM。验证自 typora-render-probe 探针:
+        //   - 入口: File.editor.nodeMap.allNodes.first().__proto__.constructor
+        //   - Ctor.parseFrom(md) → [html, nodes] (静态方法, 参数即 markdown)
+        //   - 无副作用 (write DOM / nodeMap 计数不变)
+        // 若解析器不可用 (Typora 升级变动), parse/renderTo 返回 null/false,
+        // 调用方 (如 split-view) 可降级到自有渲染器。
+        // =================================================================
+        var markdownService = (function () {
+            var _ctor = null;
+            var _ctorTried = false;
+            var _lastError = null;
+            var _cmSeq = 0;   // CodeMirror 实例唯一 id
+
+            function getCtor() {
+                if (_ctorTried) return _ctor;
+                _ctorTried = true;
+                try {
+                    var allNodes = File.editor.nodeMap.allNodes;
+                    var first = allNodes.first();
+                    var C = first.__proto__.constructor;
+                    if (typeof C.parseFrom === "function") {
+                        _ctor = C;
+                    }
+                } catch (e) {
+                    _lastError = e.message;
+                }
+                return _ctor;
+            }
+
+            /** markdown → Typora 原生 HTML (null 表示解析器不可用/失败) */
+            function parse(md) {
+                var C = getCtor();
+                if (!C) return null;
+                try {
+                    var r = C.parseFrom(String(md == null ? "" : md));
+                    return Array.isArray(r) ? String(r[0]) : null;
+                } catch (e) {
+                    _lastError = e.message;
+                    return null;
+                }
+            }
+
+            /**
+             * 渲染到容器。options:
+             *   baseDir: 相对图片/链接解析基准目录
+             * @returns {boolean} 是否成功
+             */
+            function renderTo(container, md, options) {
+                options = options || {};
+                if (!container) return false;
+                var html = parse(md);
+                if (html === null) return false;
+                container.innerHTML = html;
+
+                // 预览容器禁编辑 (Typora 输出 contenteditable="true")
+                var edits = container.querySelectorAll('[contenteditable="true"]');
+                for (var i = 0; i < edits.length; i++) {
+                    edits[i].setAttribute("contenteditable", "false");
+                }
+
+                // 相对图片 → 绝对 file:// (基于 baseDir)
+                if (options.baseDir) {
+                    var imgs = container.querySelectorAll("img");
+                    for (var j = 0; j < imgs.length; j++) {
+                        var src = imgs[j].getAttribute("src");
+                        if (src && !/^(https?:|file:|data:|mailto:|\/\/|#)/i.test(src)) {
+                            try {
+                                imgs[j].src = url.pathToFileURL(
+                                    path.resolve(options.baseDir, src)
+                                ).href;
+                            } catch (e) {}
+                        }
+                    }
+                }
+
+                // 本地 md 链接标记 data-bt-link (点击行为由调用方委托)
+                var links = container.querySelectorAll("a[href]");
+                for (var k = 0; k < links.length; k++) {
+                    var href = links[k].getAttribute("href") || "";
+                    if (!/^(https?:|file:|data:|mailto:|\/\/|#)/i.test(href)) {
+                        links[k].setAttribute("data-bt-link", href);
+                    }
+                }
+
+                // 代码块高亮 — Typora 同款 CodeMirror (环境不支持时静默跳过)
+                // 参考 typora-community-plugin: pre.md-fences → CodeMirror(el, opts, fakeEditor, cid)
+                try {
+                    if (typeof window.CodeMirror === "function") {
+                        var fences = container.querySelectorAll("pre.md-fences");
+                        for (var m = 0; m < fences.length; m++) {
+                            (function (pre) {
+                                try {
+                                    var code = pre.innerText || pre.textContent || "";
+                                    pre.innerHTML = "";
+                                    var lang = pre.getAttribute("lang") || "";
+                                    var mode = (typeof window.getCodeMirrorMode === "function")
+                                        ? window.getCodeMirrorMode(lang) : "text";
+                                    var showLineNumbers = false;
+                                    try {
+                                        showLineNumbers = !!File.option.showLineNumbersForFence;
+                                    } catch (e) {}
+                                    var cmOpts = {
+                                        mode: mode,
+                                        readOnly: true,
+                                        styleSelectedText: true,
+                                        maxHighlightLength: 1 / 0,
+                                        viewportMargin: 1 / 0,
+                                        styleActiveLine: true,
+                                        theme: " inner null-scroll",
+                                        resetSelectionOnContextMenu: true,
+                                        cursorScrollMargin: 60,
+                                        dragDrop: false,
+                                        scrollbarStyle: "null",
+                                        lineNumbers: showLineNumbers,
+                                        lineWrapping: false
+                                    };
+                                    var fakeEditor = {
+                                        sourceView: { inSourceMode: false },
+                                        undo: {
+                                            register: function () {},
+                                            lastRegisteredOperationCommand: function () {}
+                                        }
+                                    };
+                                    var cm = window.CodeMirror(pre, cmOpts, fakeEditor,
+                                        "bt-cm-" + (++_cmSeq));
+                                    cm.setValue(code);
+                                } catch (e) {}
+                            })(fences[m]);
+                        }
+                    }
+                } catch (e) {}
+
+                // 公式 (Typora 已加载 MathJax)
+                try {
+                    if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+                        window.MathJax.typesetPromise([container]);
+                    }
+                } catch (e) {}
+                return true;
+            }
+
+            return {
+                isAvailable: function () { return !!getCtor(); },
+                parse: parse,
+                renderTo: renderTo,
+                lastError: function () { return _lastError; }
+            };
+        })();
+
         // 暴露全局 API
         window.BetterTypora = {
             events: eventBus,
@@ -1662,6 +1815,7 @@
             manager: pluginManager,
             plugins: pluginManager._plugins,
             theme: themeService,
+            markdown: markdownService,
 
             // 快捷方法
             getPlugin: function (id) { return pluginManager.get(id); },

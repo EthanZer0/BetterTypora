@@ -22,6 +22,16 @@ var _onFileOpenUnsub = null;
 var _openedUnsub = null;
 
 // ===================================================================
+// 分屏协作 — 排除集 (split-view 发送到右栏的标签)
+// 排除的标签不渲染、不参与批量关闭; 文件仍在 tabStore (Typora 打开列表)
+// ===================================================================
+var _excluded = {};   // filePath → true
+
+function isExcluded(filePath) {
+    return !!_excluded[filePath];
+}
+
+// ===================================================================
 // TabDataStore — 纯数据层
 // ===================================================================
 var tabStore = {
@@ -413,8 +423,12 @@ var tabBarUI = {
         // 清空
         this.barEl.innerHTML = "";
 
-        // 无标签时隐藏
-        if (tabStore.tabs.length === 0) {
+        // 无可见标签时隐藏 (excluded 的不算)
+        var visibleCount = 0;
+        for (var vi = 0; vi < tabStore.tabs.length; vi++) {
+            if (!isExcluded(tabStore.tabs[vi].filePath)) visibleCount++;
+        }
+        if (visibleCount === 0) {
             this.barEl.style.display = "none";
             return;
         }
@@ -439,6 +453,7 @@ var tabBarUI = {
 
         for (var i = 0; i < tabStore.tabs.length; i++) {
             var tab = tabStore.tabs[i];
+            if (isExcluded(tab.filePath)) continue;   // 分屏排除: 不渲染
             var chip = document.createElement("div");
             chip.className = "typora-tab-chip" + (tab.isActive ? " active" : "") + (tab.isDirty ? " dirty" : "");
             chip.setAttribute("data-tab-id", tab.id);
@@ -956,37 +971,44 @@ function closeTab(tabId) {
 // 批量关闭 (右键菜单用)
 // ===================================================================
 
-/** 关闭除 tabId 外的所有标签, 最终激活 tabId */
+/** 关闭除 tabId 外的所有标签, 最终激活 tabId (分屏排除的标签跳过) */
 function closeOtherTabs(tabId) {
     var ids = [];
     for (var i = 0; i < tabStore.tabs.length; i++) {
-        if (tabStore.tabs[i].id !== tabId) ids.push(tabStore.tabs[i].id);
+        var t = tabStore.tabs[i];
+        if (t.id !== tabId && !isExcluded(t.filePath)) ids.push(t.id);
     }
     batchClose(ids, tabId);
 }
 
-/** 关闭 tabId 左侧所有标签 */
+/** 关闭 tabId 左侧所有标签 (分屏排除的标签跳过) */
 function closeLeftTabs(tabId) {
     var idx = tabStore._indexOf(tabId);
     if (idx <= 0) return;
     var ids = [];
-    for (var i = idx - 1; i >= 0; i--) ids.push(tabStore.tabs[i].id);
+    for (var i = idx - 1; i >= 0; i--) {
+        if (!isExcluded(tabStore.tabs[i].filePath)) ids.push(tabStore.tabs[i].id);
+    }
     batchClose(ids, tabId);
 }
 
-/** 关闭 tabId 右侧所有标签 */
+/** 关闭 tabId 右侧所有标签 (分屏排除的标签跳过) */
 function closeRightTabs(tabId) {
     var idx = tabStore._indexOf(tabId);
     if (idx < 0 || idx >= tabStore.tabs.length - 1) return;
     var ids = [];
-    for (var i = tabStore.tabs.length - 1; i > idx; i--) ids.push(tabStore.tabs[i].id);
+    for (var i = tabStore.tabs.length - 1; i > idx; i--) {
+        if (!isExcluded(tabStore.tabs[i].filePath)) ids.push(tabStore.tabs[i].id);
+    }
     batchClose(ids, tabId);
 }
 
-/** 关闭全部标签 (最后一个关闭后保持当前文档不变) */
+/** 关闭全部标签 (最后一个关闭后保持当前文档不变; 分屏排除的标签跳过) */
 function closeAllTabs() {
     var ids = [];
-    for (var i = 0; i < tabStore.tabs.length; i++) ids.push(tabStore.tabs[i].id);
+    for (var i = 0; i < tabStore.tabs.length; i++) {
+        if (!isExcluded(tabStore.tabs[i].filePath)) ids.push(tabStore.tabs[i].id);
+    }
     batchClose(ids, null);
 }
 
@@ -1065,6 +1087,8 @@ var tabContextMenu = {
         el.className = "typora-tab-menu";
         el.setAttribute("data-plugin-id", "tabs");
         var items = [
+            { fn: "send-right", label: "发送到右栏" },
+            { sep: true },
             { fn: "close", label: "关闭此标签" },
             { sep: true },
             { fn: "others", label: "关闭其他标签" },
@@ -1110,6 +1134,7 @@ var tabContextMenu = {
             var item = this.el.querySelector('[data-action="' + action + '"]');
             if (item) item.classList.toggle("disabled", disabled);
         }.bind(this);
+        setState("send-right", !this._hasSplitView());
         setState("others", n < 2);
         setState("left", idx <= 0);
         setState("right", idx < 0 || idx >= n - 1);
@@ -1117,10 +1142,30 @@ var tabContextMenu = {
         setState("reopen", !tabStore.closedStack || tabStore.closedStack.length === 0);
     },
 
+    /** split-view 插件是否已加载 (未安装时禁用发送菜单) */
+    _hasSplitView: function () {
+        try {
+            var p = window.BetterTypora.getPlugin("split-view");
+            return !!(p && p.state === "enabled");
+        } catch (e) {
+            return false;
+        }
+    },
+
     _exec: function (fn) {
         var tabId = this.targetTabId;
         this.close();
         switch (fn) {
+            case "send-right":
+                if (tabId) {
+                    var t = tabStore.tabs[tabStore._indexOf(tabId)];
+                    if (t && t.filePath) {
+                        try {
+                            window.BetterTypora.commands.execute("split-view:send-file", t.filePath);
+                        } catch (e) {}
+                    }
+                }
+                break;
             case "close":
                 if (tabId) closeTab(tabId);
                 break;
@@ -1559,6 +1604,25 @@ module.exports = {
         api.registerCommand("create-untitled", function () {
             newFileInterceptor.createUntitledTab();
         }, "创建无标题新标签 (由主进程新建菜单触发)");
+
+        // 10. 分屏协作命令 (split-view 调用)
+        api.registerCommand("set-excluded", function (filePath, excluded) {
+            if (!filePath) return;
+            if (excluded) _excluded[filePath] = true;
+            else delete _excluded[filePath];
+            tabBarUI.render();
+        }, "标记/取消标签为分屏排除 (split-view 协作)");
+
+        api.registerCommand("clear-excluded", function () {
+            _excluded = {};
+            tabBarUI.render();
+        }, "清空分屏排除集 (split-view 关闭分屏时调用)");
+
+        api.registerCommand("get-visible-paths", function () {
+            return tabStore.tabs
+                .filter(function (t) { return !isExcluded(t.filePath); })
+                .map(function (t) { return t.filePath; });
+        }, "获取可见标签路径列表 (排除分屏标签)");
 
         logger.log("标签页插件已启用 ✅ (" + tabStore.tabs.length + " 个标签)");
     },

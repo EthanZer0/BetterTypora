@@ -1,0 +1,785 @@
+/**
+ * Split View — 左右分屏插件 v5 (Tabs 协作版)
+ * ======================================
+ * 架构 (方案 B: 标签系统唯一 = tabs 插件, split-view 不建自己的标签条):
+ *   - 左栏 = Typora 编辑器 + tabs 标签栏 (分屏时标签栏 CSS 浮动到左栏
+ *     顶部, 编辑器贴片从标签栏下方开始)
+ *   - 右栏 = 接收栏: 右标签栈 + marked 预览, 可接管编辑器
+ *   - "发送到右栏" (tabs 标签右键菜单): tabs 插件把该标签加入排除集
+ *     (标签栏不再显示它), 右栏加入 + 编辑器切右栏; 左栏显示"邻近标签"
+ *     的预览。发送回左栏/关闭右标签 → 移出排除集, 标签恢复
+ *   - 联动: 活动栏=右时, 左栏标签切换 (opened 且不在右栈) → 编辑器
+ *     自动回左栏
+ *   - 渲染: BetterTypora.markdown (Typora 原生解析器 + CodeMirror 高亮)
+ *
+ * 命令: split-view:toggle / split-view:send-file (tabs 菜单调用)
+ */
+var BetterTypora = require("bettertypora:api");
+var api = BetterTypora.api;
+var logger = BetterTypora.logger;
+var fs = require("fs");
+var path = require("path");
+var renderer = require("./renderer");
+
+var escapeHtml = function (s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+};
+
+/* ------------------------------------------------------------------ */
+/* 状态                                                                 */
+/* ------------------------------------------------------------------ */
+
+var _active = false;
+var _activeSide = "left";
+var _pendingSide = null;       // 挂起迁移: 等 opened 确认目标文件加载完成
+var _leftPreviewPath = null;   // 左栏预览文件 (活动栏=右时渲染; 发送时=邻近标签)
+var _rightTabs = [];           // 右栏标签栈 [{path, name}]
+var _rightActive = -1;
+var _closedStack = [];         // 右栏最近关闭 (重新打开)
+var MAX_CLOSED = 15;
+var _editorEl = null;          // writingArea 父容器 (贴片目标)
+var _tabBarEl = null;          // #typora-tab-bar (分屏时浮动到左栏顶部)
+var _els = {};
+var _sidebarRight = 0;
+var _footerH = 0;            // Typora 底部 footer 高度 (容器让位, 避免盖住)
+var _lastContW = 0;          // 容器宽度快照 (变化检测)
+var _layoutTimer = null;
+var _handlers = {};
+var _ctxMenu = null;
+var _ctxTargetIdx = -1;
+
+/* ------------------------------------------------------------------ */
+/* tabs 插件协作 (命令通道)                                               */
+/* ------------------------------------------------------------------ */
+
+function tabsCmd(cmd) {
+    try {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return window.BetterTypora.commands.execute("tabs:" + cmd, args[0], args[1]);
+    } catch (e) {
+        return null;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* DOM 构建/销毁                                                        */
+/* ------------------------------------------------------------------ */
+
+function buildDom() {
+    var c = document.createElement("div");
+    c.id = "bt-split-container";
+    c.innerHTML =
+        '<div class="bt-split-left" id="bt-split-left">' +
+        '  <div class="bt-split-content bt-split-preview" id="bt-split-left-content"></div>' +
+        "</div>" +
+        '<div class="bt-split-divider" id="bt-split-divider"></div>' +
+        '<div class="bt-split-right" id="bt-split-right">' +
+        '  <div class="bt-split-tabs" id="bt-split-right-tabs"></div>' +
+        '  <div class="bt-split-content bt-split-preview" id="bt-split-right-content"></div>' +
+        "</div>";
+    document.body.appendChild(c);
+
+    _els.container = c;
+    _els.left = document.getElementById("bt-split-left");
+    _els.divider = document.getElementById("bt-split-divider");
+    _els.right = document.getElementById("bt-split-right");
+    _els.tabs = document.getElementById("bt-split-right-tabs");
+    _els.leftContent = document.getElementById("bt-split-left-content");
+    _els.rightContent = document.getElementById("bt-split-right-content");
+}
+
+function destroyDom() {
+    if (_els.container && _els.container.parentNode) {
+        _els.container.parentNode.removeChild(_els.container);
+    }
+    _els = {};
+}
+
+/* ------------------------------------------------------------------ */
+/* 布局                                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 侧边栏右缘 (布局值)。
+ * Typora 原生机制 (frame.js + window.css 分析):
+ *   - 展开: #typora-sidebar 加 "open" class; 收起: 移除 "open" class
+ *   - 宽度: JS 设置 --sidebar-width (如 192px), 动画 = left + transition .3s
+ * 测量: open class 在动画第一帧即切换 → 立即返回目标值。
+ * 宽度优先级: CSS 变量 → 缓存 (首次实测) — showSidebar 加 class 后
+ * 变量可能稍后才设置, 依赖变量会让内容让位延后 ("不跟手")。
+ */
+var _sidebarW = 0;   // 侧边栏宽度缓存 (变量未就绪时兜底)
+
+function getSidebarRight() {
+    var sidebar = document.getElementById("typora-sidebar");
+    if (!sidebar) return 0;
+    var cs = getComputedStyle(sidebar);
+    if (cs.display === "none") return 0;
+    if (!sidebar.classList.contains("open")) return 0;   // 收起 (含动画开始瞬间)
+
+    var w = parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--sidebar-width"));
+    if (w > 0) {
+        _sidebarW = w;
+        return w;
+    }
+    if (_sidebarW > 0) return _sidebarW;                 // 变量未就绪 → 缓存
+    var rw = sidebar.getBoundingClientRect().width;      // 首次实测兜底
+    if (rw > 0) _sidebarW = rw;
+    return rw > 0 ? rw : 0;
+}
+
+function measureLayout() {
+    _sidebarRight = getSidebarRight();
+    // footer 让位: 容器 bottom 止于 footer 上方, 否则 fixed 容器会盖住它
+    var footerEl = document.querySelector(".ty-footer");
+    _footerH = footerEl ? footerEl.offsetHeight : 0;
+    // 容器全宽 (右栏滚动条贴窗口右缘; 内容右缘留白由 #write padding 提供)
+    _els.container.style.left = _sidebarRight + "px";
+    _els.container.style.width = Math.max(0, window.innerWidth - _sidebarRight) + "px";
+    _els.container.style.bottom = _footerH + "px";
+}
+
+/** 活动栏内容区矩形 (视口坐标) */
+function getActivePaneRect() {
+    if (_activeSide === "left") {
+        var tabH = _tabBarEl ? _tabBarEl.offsetHeight : 0;
+        return {
+            left: _sidebarRight,
+            top: tabH,
+            width: _els.left.offsetWidth,
+            height: Math.max(0, window.innerHeight - tabH - _footerH)
+        };
+    }
+    return _els.rightContent.getBoundingClientRect();
+}
+
+function syncEditor() {
+    if (!_editorEl || !_active) return;
+    var r = getActivePaneRect();
+    _editorEl.style.setProperty("--bt-editor-top", r.top + "px");
+    _editorEl.style.setProperty("--bt-editor-left", r.left + "px");
+    _editorEl.style.setProperty("--bt-editor-width", r.width + "px");
+    _editorEl.style.setProperty("--bt-editor-height", r.height + "px");
+    // 浮动标签栏 (左栏顶部)
+    if (_tabBarEl) {
+        _tabBarEl.style.setProperty("--bt-tabbar-left", _sidebarRight + "px");
+        _tabBarEl.style.setProperty("--bt-tabbar-width", _els.left.offsetWidth + "px");
+    }
+}
+
+function onLayoutTick() {
+    if (!_active) return;
+    var right = getSidebarRight();
+    var footerEl = document.querySelector(".ty-footer");
+    var fh = footerEl ? footerEl.offsetHeight : 0;
+    // 容器宽度变化检测 (窗口 resize / 自身宽度调整时贴片需同步)
+    var contW = _els.container.offsetWidth;
+    var contChanged = contW && Math.abs(contW - _lastContW) > 2;
+    if (Math.abs(right - _sidebarRight) > 2 || Math.abs(fh - _footerH) > 2 || contChanged) {
+        _lastContW = contW;
+        measureLayout();
+        syncEditor();
+    }
+    updateDirty();
+}
+
+/** dirty 轮询: 当前文件被编辑时右栏对应标签显示脏点 */
+function updateDirty() {
+    var cur = BetterTypora.getCurrentFile();
+    var dirty = cur ? !!BetterTypora.isDocumentEdited() : false;
+    var chips = _els.tabs.querySelectorAll(".typora-tab-chip");
+    for (var i = 0; i < chips.length; i++) {
+        var idx = parseInt(chips[i].getAttribute("data-idx"), 10);
+        var t = _rightTabs[idx];
+        if (t && t.path === cur && dirty) chips[i].classList.add("dirty");
+        else chips[i].classList.remove("dirty");
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 右栏标签栈                                                           */
+/* ------------------------------------------------------------------ */
+
+function findRightTab(filePath) {
+    for (var i = 0; i < _rightTabs.length; i++) {
+        if (_rightTabs[i].path === filePath) return i;
+    }
+    return -1;
+}
+
+function addRightTab(filePath) {
+    var idx = findRightTab(filePath);
+    if (idx >= 0) {
+        _rightActive = idx;
+        renderRightTabs();
+        return;
+    }
+    _rightTabs.push({ path: filePath, name: path.basename(filePath) });
+    _rightActive = _rightTabs.length - 1;
+    renderRightTabs();
+}
+
+function selectRightTab(idx) {
+    if (idx < 0 || idx >= _rightTabs.length) return;
+    _rightActive = idx;
+    renderRightTabs();
+    if (_activeSide === "right") {
+        var fp = _rightTabs[idx].path;
+        if (fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
+    } else {
+        syncPanes();
+    }
+}
+
+function adjustRightActive(idx) {
+    if (idx < _rightActive) _rightActive--;
+    else if (idx === _rightActive) {
+        _rightActive = _rightTabs.length ? Math.min(idx, _rightTabs.length - 1) : -1;
+    }
+}
+
+/** 文件不再被右栈持有 → 通知 tabs 移出排除集 */
+function maybeUnexclude(filePath) {
+    if (findRightTab(filePath) < 0) {
+        tabsCmd("set-excluded", filePath, false);
+    }
+}
+
+function closeRightTab(idx) {
+    if (idx < 0 || idx >= _rightTabs.length) return;
+    var closed = _rightTabs[idx].path;
+    _rightTabs.splice(idx, 1);
+    _closedStack.push(closed);
+    if (_closedStack.length > MAX_CLOSED) _closedStack.shift();
+    adjustRightActive(idx);
+    renderRightTabs();
+    maybeUnexclude(closed);
+
+    afterRightTabsChanged();
+}
+
+/** 右栈变化后: 活动栏同步 / 预览刷新 */
+function afterRightTabsChanged() {
+    if (_rightTabs.length === 0) {
+        if (_activeSide === "right") setActiveSide("left");
+        else syncPanes();
+        return;
+    }
+    if (_activeSide === "right") {
+        var fp = _rightTabs[_rightActive].path;
+        if (fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
+    } else {
+        syncPanes();
+    }
+}
+
+function renderRightTabs() {
+    _els.tabs.innerHTML = "";
+    for (var i = 0; i < _rightTabs.length; i++) {
+        (function (idx) {
+            var t = _rightTabs[idx];
+            var chip = document.createElement("div");
+            chip.className = "typora-tab-chip" + (idx === _rightActive ? " active" : "");
+            chip.setAttribute("data-idx", idx);
+            var label = document.createElement("span");
+            label.className = "typora-tab-label";
+            label.textContent = t.name;
+            var closeBtn = document.createElement("span");
+            closeBtn.className = "typora-tab-close";
+            closeBtn.textContent = "×";
+            chip.appendChild(label);
+            chip.appendChild(closeBtn);
+
+            chip.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                if (ev.target === closeBtn) closeRightTab(idx);
+                else selectRightTab(idx);
+            });
+            chip.addEventListener("contextmenu", function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                openCtxMenu(ev.clientX, ev.clientY, idx);
+            });
+            _els.tabs.appendChild(chip);
+        })(i);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 右标签右键菜单 (与 tabs 菜单同构, 操作右栈)                              */
+/* ------------------------------------------------------------------ */
+
+var CTX_ITEMS = [
+    { fn: "send-left", label: "发送到左栏" },
+    { sep: true },
+    { fn: "close", label: "关闭此标签" },
+    { sep: true },
+    { fn: "others", label: "关闭其他标签" },
+    { fn: "left", label: "关闭左侧标签" },
+    { fn: "right", label: "关闭右侧标签" },
+    { sep: true },
+    { fn: "all", label: "关闭全部标签" },
+    { fn: "reopen", label: "重新打开已关闭标签" }
+];
+
+function openCtxMenu(x, y, idx) {
+    closeCtxMenu();
+    _ctxTargetIdx = idx;
+
+    var menu = document.createElement("div");
+    menu.className = "typora-tab-menu";
+    menu.setAttribute("data-plugin-id", "split-view");
+    for (var i = 0; i < CTX_ITEMS.length; i++) {
+        var it = CTX_ITEMS[i];
+        if (it.sep) {
+            var sep = document.createElement("div");
+            sep.className = "typora-tab-menu-sep";
+            menu.appendChild(sep);
+            continue;
+        }
+        var item = document.createElement("div");
+        item.className = "typora-tab-menu-item";
+        item.setAttribute("data-action", it.fn);
+        item.textContent = it.label;
+        (function (fn) {
+            item.addEventListener("mousedown", function (e) { e.preventDefault(); });
+            item.addEventListener("click", function (e) {
+                e.stopPropagation();
+                ctxExec(fn);
+            });
+        })(it.fn);
+        menu.appendChild(item);
+    }
+    document.body.appendChild(menu);
+    _ctxMenu = menu;
+
+    var n = _rightTabs.length;
+    var setState = function (action, disabled) {
+        var el = menu.querySelector('[data-action="' + action + '"]');
+        if (el) el.classList.toggle("disabled", disabled);
+    };
+    setState("others", n < 2);
+    setState("left", idx <= 0);
+    setState("right", idx < 0 || idx >= n - 1);
+    setState("all", n < 2);
+    setState("reopen", _closedStack.length === 0);
+
+    menu.style.display = "block";
+    var w = menu.offsetWidth || 180;
+    var h = menu.offsetHeight || 240;
+    var left = x, top = y;
+    if (left + w > window.innerWidth - 8) left = x - w - 4;
+    if (top + h > window.innerHeight - 8) top = y - h - 4;
+    menu.style.left = Math.max(4, left) + "px";
+    menu.style.top = Math.max(4, top) + "px";
+    requestAnimationFrame(function () { menu.classList.add("open"); });
+
+    setTimeout(function () {
+        document.addEventListener("mousedown", _ctxDismissHandler, true);
+        document.addEventListener("keydown", _ctxEscHandler, true);
+    }, 0);
+}
+
+function _ctxEscHandler(e) {
+    if (e.key === "Escape") closeCtxMenu();
+}
+
+/** 点击菜单外部关闭 (菜单内部 mousedown 不清状态, 否则动作全部失效) */
+function _ctxDismissHandler(e) {
+    if (_ctxMenu && !_ctxMenu.contains(e.target)) closeCtxMenu();
+}
+
+function closeCtxMenu() {
+    if (_ctxMenu) {
+        _ctxMenu.classList.remove("open");
+        if (_ctxMenu.parentNode) _ctxMenu.parentNode.removeChild(_ctxMenu);
+        _ctxMenu = null;
+    }
+    _ctxTargetIdx = -1;
+    document.removeEventListener("mousedown", _ctxDismissHandler, true);
+    document.removeEventListener("keydown", _ctxEscHandler, true);
+}
+
+function ctxExec(fn) {
+    var idx = _ctxTargetIdx;
+    closeCtxMenu();
+    switch (fn) {
+        case "send-left":
+            sendToLeft(idx);
+            break;
+        case "close":
+            closeRightTab(idx);
+            break;
+        case "others":
+            closeRightOthers(idx);
+            break;
+        case "left":
+            closeRightLeftOf(idx);
+            break;
+        case "right":
+            closeRightRightOf(idx);
+            break;
+        case "all":
+            closeAllRight();
+            break;
+        case "reopen":
+            reopenRightClosed();
+            break;
+    }
+}
+
+function closeRightOthers(idx) {
+    _rightTabs = [_rightTabs[idx]];
+    _rightActive = 0;
+    renderRightTabs();
+    afterRightTabsChanged();
+}
+
+function closeRightLeftOf(idx) {
+    _rightTabs.splice(0, idx);
+    _rightActive = Math.max(0, _rightActive - idx);
+    renderRightTabs();
+    afterRightTabsChanged();
+}
+
+function closeRightRightOf(idx) {
+    _rightTabs.splice(idx + 1);
+    if (_rightActive > idx) _rightActive = idx;
+    renderRightTabs();
+    afterRightTabsChanged();
+}
+
+function closeAllRight() {
+    _rightTabs = [];
+    _rightActive = -1;
+    renderRightTabs();
+    afterRightTabsChanged();
+}
+
+function reopenRightClosed() {
+    var fp = _closedStack.pop();
+    if (fp) {
+        addRightTab(fp);
+        tabsCmd("set-excluded", fp, true);
+        afterRightTabsChanged();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 发送 (Tabs 协作)                                                     */
+/* ------------------------------------------------------------------ */
+
+/** tabs 右键菜单入口: 发送文件到右栏 (未开启时自动开启) */
+function sendToRight(filePath) {
+    if (!_active) {
+        enable();
+        if (!_active) return false;
+    }
+    if (!filePath) return false;
+
+    if (findRightTab(filePath) < 0) {
+        // 左栏预览 = 发送文件的邻近可见标签 (右优先, 无则左)
+        try {
+            var visible = tabsCmd("get-visible-paths") || [];
+            var vi = visible.indexOf(filePath);
+            var neighbor = visible[vi + 1] || visible[vi - 1] || null;
+            if (neighbor && findRightTab(neighbor) < 0) _leftPreviewPath = neighbor;
+        } catch (e) {}
+        addRightTab(filePath);
+        tabsCmd("set-excluded", filePath, true);
+    }
+    setActiveSide("right");
+    return true;
+}
+
+/** 右标签右键: 发送到左栏 (移出排除集, 标签恢复, 编辑器回左栏) */
+function sendToLeft(idx) {
+    if (idx < 0 || idx >= _rightTabs.length) return;
+    var fp = _rightTabs[idx].path;
+    _rightTabs.splice(idx, 1);
+    adjustRightActive(idx);
+    renderRightTabs();
+    tabsCmd("set-excluded", fp, false);
+    _leftPreviewPath = fp;
+    setActiveSide("left");
+}
+
+/* ------------------------------------------------------------------ */
+/* 预览渲染                                                             */
+/* ------------------------------------------------------------------ */
+
+function renderPreviewInto(container, filePath) {
+    if (!filePath) {
+        container.innerHTML = '<div class="bt-split-empty">此栏暂无文件</div>';
+        return;
+    }
+    try {
+        var md = fs.readFileSync(filePath, "utf8");
+        renderer.renderTo(container, md, filePath);
+    } catch (e) {
+        container.innerHTML = '<div class="bt-split-empty">读取失败: ' + escapeHtml(e.message) + "</div>";
+    }
+}
+
+function syncPanes() {
+    if (_activeSide === "left") {
+        // 左栏被编辑器贴片覆盖; 右栏渲染预览
+        _els.leftContent.innerHTML = "";
+        var fp = _rightActive >= 0 ? _rightTabs[_rightActive].path : null;
+        renderPreviewInto(_els.rightContent, fp);
+    } else {
+        // 编辑器在右栏; 左栏渲染左预览 (邻近标签)
+        renderPreviewInto(_els.leftContent, _leftPreviewPath);
+        _els.rightContent.innerHTML = "";
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 活动栏切换                                                           */
+/* ------------------------------------------------------------------ */
+
+function doActivate(side) {
+    _activeSide = side;
+    // 活动栏切换: 贴片瞬移 (无过渡)
+    syncEditor();
+    syncPanes();
+}
+
+/**
+ * 切换活动栏。目标文件 ≠ Typora 当前文件时先 openFile 并挂起,
+ * 等 opened 事件确认加载完成再迁移 — 避免贴片带旧内容闪现。
+ */
+function setActiveSide(side) {
+    if (!_active || side === _activeSide) return;
+    if (side === "right" && _rightActive < 0) return;
+
+    var target = side === "right" ? _rightTabs[_rightActive].path : _leftPreviewPath;
+    var cur = BetterTypora.getCurrentFile();
+    if (target && target !== cur) {
+        _pendingSide = side;
+        BetterTypora.openFile(target);
+        return;
+    }
+    _pendingSide = null;
+    doActivate(side);
+}
+
+/* ------------------------------------------------------------------ */
+/* 命令                                                                 */
+/* ------------------------------------------------------------------ */
+
+function toggle() {
+    if (_active) disable();
+    else enable();
+}
+
+function enable() {
+    if (_active) return;
+    var wa = null;
+    try {
+        wa = File.editor.writingArea;
+    } catch (e) {}
+    if (!wa) {
+        window.BetterTypora.toast("无法访问编辑器, 分屏不可用", 3000);
+        return;
+    }
+    _editorEl = wa.parentElement;
+    _tabBarEl = document.getElementById("typora-tab-bar");
+    _leftPreviewPath = BetterTypora.getCurrentFile();
+    _rightTabs = [];
+    _rightActive = -1;
+    _closedStack = [];
+
+    // 标签栏浮动到左栏顶部 (不隐藏, 保留 tabs 插件全部能力)
+    if (_tabBarEl) _tabBarEl.classList.add("bt-tabbar-floating");
+    _editorEl.classList.add("bt-editor-fixed");
+
+    buildDom();
+    _active = true;
+    _activeSide = "left";
+    _pendingSide = null;
+
+    measureLayout();
+    syncEditor();
+    syncPanes();
+    renderRightTabs();
+    bindEvents();
+
+    _layoutTimer = setInterval(onLayoutTick, 150);
+    logger.log("分屏已开启 (活动栏: 左)");
+    window.BetterTypora.toast("分屏已开启 — 右键标签可发送到右栏", 2500);
+}
+
+function disable() {
+    if (!_active) return;
+    _active = false;
+    _pendingSide = null;
+    if (_layoutTimer) { clearInterval(_layoutTimer); _layoutTimer = null; }
+    unbindEvents();
+    closeCtxMenu();
+    if (_editorEl) _editorEl.classList.remove("bt-editor-fixed");
+    if (_tabBarEl) _tabBarEl.classList.remove("bt-tabbar-floating");
+    // 恢复所有被排除的标签
+    tabsCmd("clear-excluded");
+    _editorEl = null;
+    _tabBarEl = null;
+    destroyDom();
+    _rightTabs = [];
+    _rightActive = -1;
+    _closedStack = [];
+    _leftPreviewPath = null;
+    logger.log("分屏已关闭");
+    window.BetterTypora.toast("分屏已关闭", 2000);
+}
+
+/* ------------------------------------------------------------------ */
+/* 事件                                                                 */
+/* ------------------------------------------------------------------ */
+
+function onFileOpened(data) {
+    if (!_active) return;
+    var fp = data && data.path;
+    if (!fp) return;
+
+    // 挂起迁移: 目标文件加载完成 → 迁移贴片
+    if (_pendingSide) {
+        var targetSide = _pendingSide;
+        var want = targetSide === "right"
+            ? (_rightActive >= 0 ? _rightTabs[_rightActive].path : null)
+            : _leftPreviewPath;
+        if (want === fp) {
+            _pendingSide = null;
+            doActivate(targetSide);
+            return;
+        }
+        _pendingSide = null;   // 目标不符 → 丢弃挂起
+    }
+
+    if (_activeSide === "left") {
+        _leftPreviewPath = fp;
+    } else {
+        var idx = findRightTab(fp);
+        if (idx >= 0) {
+            if (idx !== _rightActive) {
+                _rightActive = idx;
+                renderRightTabs();
+            }
+        } else {
+            // 左栏标签/外部切换 → 编辑器回左栏 (Typora 已切, 不重复 openFile)
+            _leftPreviewPath = fp;
+            doActivate("left");
+        }
+    }
+}
+
+/**
+ * 窗口 resize (含 Typora 侧边栏动画第一帧的 resize 广播 —
+ * frame.js listenCurrentTransition: transitionstart → dispatch resize)。
+ * 侧边栏展开/收起时 open class 已切换, getSidebarRight 立即返回目标值,
+ * 此处同步布局 — 无滞后无抽搐, 也不需要额外的 transitionrun 监听。
+ */
+function onWindowResize() {
+    if (!_active) return;
+    measureLayout();
+    syncEditor();
+}
+
+function onClickContainer(e) {
+    if (!_active) return;
+    // 预览区链接 → 左栏打开目标
+    var a = e.target.closest ? e.target.closest("a[data-bt-link]") : null;
+    if (a) {
+        e.preventDefault();
+        e.stopPropagation();
+        openLinkTarget(a.getAttribute("data-bt-link"));
+        return;
+    }
+    // 点击预览空白 → 切换活动栏 (编辑器唤过来)
+    var pv = e.target.closest ? e.target.closest(".bt-split-preview") : null;
+    if (pv) {
+        var side = pv === _els.leftContent ? "left" : "right";
+        setActiveSide(side);
+    }
+}
+
+function openLinkTarget(rel) {
+    var base = null;
+    if (_activeSide === "right" && _rightActive >= 0) base = _rightTabs[_rightActive].path;
+    else base = _leftPreviewPath;
+    if (!base || !rel) return;
+    var abs = path.resolve(path.dirname(base), rel);
+    // 在左栏打开 (tabs 标签恢复显示)
+    _leftPreviewPath = abs;
+    setActiveSide("left");
+    BetterTypora.openFile(abs);
+}
+
+function onDividerMouseDown(e) {
+    if (!_active) return;
+    e.preventDefault();
+    _els.divider.classList.add("dragging");
+    var startX = e.clientX;
+    var leftW = _els.left.offsetWidth;
+    var totalW = _els.container.offsetWidth;
+    var minW = 200;
+
+    function onMove(ev) {
+        var delta = ev.clientX - startX;
+        var newLeft = Math.max(minW, Math.min(totalW - minW - 4, leftW + delta));
+        // 像素宽度直接控制左栏 (内联 style 最高优先级, 不经 flex 算法)
+        _els.left.style.width = newLeft + "px";
+        syncEditor();
+    }
+    function onUp() {
+        _els.divider.classList.remove("dragging");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+}
+
+function bindEvents() {
+    _handlers.onFileOpened = onFileOpened;
+    _handlers.onWindowResize = onWindowResize;
+    _handlers.onClickContainer = onClickContainer;
+    _handlers.onDividerMouseDown = onDividerMouseDown;
+    window.addEventListener("resize", _handlers.onWindowResize);
+    _els.container.addEventListener("click", _handlers.onClickContainer);
+    _els.divider.addEventListener("mousedown", _handlers.onDividerMouseDown);
+    window.BetterTypora.onFileEvent("opened", _handlers.onFileOpened);
+}
+
+function unbindEvents() {
+    if (_handlers.onWindowResize) window.removeEventListener("resize", _handlers.onWindowResize);
+    if (_els.container && _handlers.onClickContainer) {
+        _els.container.removeEventListener("click", _handlers.onClickContainer);
+    }
+    if (_els.divider && _handlers.onDividerMouseDown) {
+        _els.divider.removeEventListener("mousedown", _handlers.onDividerMouseDown);
+    }
+    if (_handlers.onFileOpened) {
+        window.BetterTypora.offFileEvent("opened", _handlers.onFileOpened);
+    }
+    _handlers = {};
+}
+
+/* ------------------------------------------------------------------ */
+/* 生命周期                                                             */
+/* ------------------------------------------------------------------ */
+
+exports.onLoad = function () {
+    api.registerCommand("toggle", toggle, "开关分屏");
+    api.registerCommand("send-file", function (filePath) {
+        sendToRight(filePath);
+    }, "发送指定文件到右栏 (tabs 菜单调用)");
+    logger.log("分屏插件已加载 (split-view:toggle 开启)");
+};
+
+exports.onUnload = function () {
+    if (_active) disable();
+    logger.log("分屏插件已卸载");
+};
