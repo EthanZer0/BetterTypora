@@ -479,36 +479,26 @@ function reopenRightClosed() {
 /* 预览主题样式注入 — 预览与编辑器共享主题语法样式                           */
 /* ------------------------------------------------------------------ */
 
-/**
- * 注入白名单 — 只注入语法属性 (颜色/字体/背景/边框/字号/行高/文本样式),
- * 布局属性 (width/flex/align-self/margin/padding 等) 一律过滤。
- * 黑名单会漏 (曾漏掉 align-self 之类导致 rightContent 不被 stretch,
- * 被压成 48px 竖线), 白名单彻底杜绝。
- */
-var SYNTAX_WHITELIST = /^(color|background|background-color|background-image|background-size|background-position|background-repeat|font|font-family|font-size|font-weight|font-style|font-variant|line-height|letter-spacing|word-spacing|text-align|text-decoration|text-decoration-color|text-decoration-line|text-decoration-style|text-transform|text-indent|text-shadow|white-space|word-break|word-wrap|border|border-color|border-style|border-width|border-top|border-right|border-bottom|border-left|border-top-color|border-right-color|border-bottom-color|border-left-color|border-top-style|border-right-style|border-bottom-style|border-left-style|border-top-width|border-right-width|border-bottom-width|border-left-width|border-radius|border-collapse|outline|outline-color|outline-style|outline-width|box-shadow|opacity|list-style|list-style-type|list-style-position|list-style-image|cursor|quotes|content)$/i;
+// #write 选择器精确匹配: 后跟选择器边界 (类/伪类/属性/空格/组合器/逗号/结束),
+// 避免子串误匹配 (#write-x、#writeArea 等)
+var WRITE_SEL = /#write(?=[.#:\[\s>~,+]|$)/;
+var WRITE_SEL_G = /#write(?=[.#:\[\s>~,+]|$)/g;
 
-function filterLayoutProps(style, allowPad) {
-    var out = [];
-    try {
-        for (var i = 0; i < style.length; i++) {
-            var prop = style[i];
-            if (SYNTAX_WHITELIST.test(prop)) {
-                out.push(prop + ":" + style.getPropertyValue(prop));
-            } else if (allowPad && /^padding/.test(prop)) {
-                // 块级语法元素 (meta-block/fences/blockquote/table) 的内边距
-                // 是排版语法, 放行; 不影响栏布局
-                out.push(prop + ":" + style.getPropertyValue(prop));
-            }
-        }
-    } catch (e) {}
-    return out.join(";");
+/** 重写含 #write 的选择器 → 内容层版。预览内容包在 .bt-write-clone 内,
+ * 结构镜像编辑器 #write (子组合器直接对应) */
+function rewriteSelector(sel) {
+    return sel
+        .replace(/#write\s*>/g, ".bt-write-clone >")
+        .replace(WRITE_SEL_G, ".bt-write-clone");
 }
 
 /**
- * 通过 CSSOM 读取当前主题样式表 (#theme_css), 把含 #write 的选择器
- * 复制一份 .bt-split-preview 版 (如 `#write h1` → 追加 `.bt-split-preview h1`),
- * 重建 CSS 注入 <style>。预览容器不在 #write 内, 主题样式原本不生效
- * (只有基础样式, 寡淡) — 注入后语法样式与编辑器一致。支持 @media 递归。
+ * 遍历样式表, 把含 #write 的选择器复制一份 .bt-write-clone 版
+ * (如 `#write h1` → 追加 `.bt-write-clone h1`), 声明原样注入 —
+ * 内容层 (镜像 #write) 与滚动容器分离, 布局属性 (padding/margin/
+ * max-width/display:flex 等) 作用于内容层不破坏栏布局, 无需白名单
+ * 过滤; 装饰性伪元素 (语言标签/YAML 标签/任务勾号) 依赖的 position
+ * 保留, 正常渲染。极小黑名单: 只挡 z-index (防主题层级干扰分屏)。
  * 主题切换时 (theme.onChange) 重新注入。
  */
 function installPreviewTheme() {
@@ -517,38 +507,46 @@ function installPreviewTheme() {
         function rewriteRules(rules, out) {
             for (var i = 0; i < rules.length; i++) {
                 var r = rules[i];
-                if (r.selectorText && r.style && r.selectorText.indexOf("#write") >= 0) {
-                    // 块级语法元素 (meta-block/fences/blockquote/table/figure)
-                    // 与容器自身 (#write 单独规则, 写作区内边距) 的 padding
-                    // 放行 — 排版语法, 且 padding 是内部属性不影响栏布局
-                    var allowPad = /pre\.md-|blockquote|table|figure/.test(r.selectorText);
-                    if (!allowPad) {
-                        var parts2 = r.selectorText.split(",");
-                        for (var k = 0; k < parts2.length; k++) {
-                            if (parts2[k].trim() === "#write") { allowPad = true; break; }
+                try {
+                    if (r.selectorText && r.style && WRITE_SEL.test(r.selectorText)) {
+                        // 只挡 z-index — 主题给 #write 设层级会干扰分屏布局
+                        var hasZ = false;
+                        for (var zi = 0; zi < r.style.length; zi++) {
+                            if (r.style[zi] === "z-index") { hasZ = true; break; }
                         }
-                    }
-                    var css = filterLayoutProps(r.style, allowPad);
-                    if (!css) continue;
-                    var parts = r.selectorText.split(",");
-                    var extra = [];
-                    for (var j = 0; j < parts.length; j++) {
-                        if (parts[j].indexOf("#write") >= 0) {
-                            extra.push(parts[j].replace(/#write/g, ".bt-split-preview"));
+                        if (hasZ) continue;
+                        var css = "";
+                        for (var ci = 0; ci < r.style.length; ci++) {
+                            css += r.style[ci] + ":" +
+                                r.style.getPropertyValue(r.style[ci]) + ";";
                         }
+                        if (!css) continue;
+                        var parts = r.selectorText.split(",");
+                        var extra = [];
+                        for (var j = 0; j < parts.length; j++) {
+                            if (WRITE_SEL.test(parts[j])) {
+                                extra.push(rewriteSelector(parts[j]));
+                            }
+                        }
+                        if (extra.length) {
+                            out.push(r.selectorText + ", " + extra.join(", ") +
+                                " {" + css + "}");
+                        }
+                    } else if (r.cssRules && r.media) {
+                        // @media: 递归处理内部规则。必须检查 r.media —
+                        // @keyframes/@supports 也有 cssRules 但无 media
+                        var inner = [];
+                        rewriteRules(r.cssRules, inner);
+                        if (inner.length) {
+                            out.push("@media " + r.media.mediaText + " {\n" +
+                                inner.join("\n") + "\n}");
+                        }
+                    } else if (r.styleSheet && r.styleSheet.cssRules) {
+                        // @import 子样式表: 递归处理 (跨域子表由 try 跳过)
+                        rewriteRules(r.styleSheet.cssRules, out);
                     }
-                    if (extra.length) {
-                        out.push(r.selectorText + ", " + extra.join(", ") +
-                            " {" + css + "}");
-                    }
-                } else if (r.cssRules) {
-                    // @media: 递归处理内部规则
-                    var inner = [];
-                    rewriteRules(r.cssRules, inner);
-                    if (inner.length) {
-                        out.push("@media " + r.media.mediaText + " {\n" +
-                            inner.join("\n") + "\n}");
-                    }
+                } catch (e) {
+                    // 单条规则异常不中断整个样式表处理
                 }
             }
         }
@@ -556,7 +554,7 @@ function installPreviewTheme() {
         var out = [];
         // 遍历所有样式表 (base.css 基础 + 当前主题, 按 DOM 顺序叠加 —
         // 与编辑器一致)。跨域 sheet (如 typora-bg://) cssRules 访问抛错,
-        // 单独跳过; 错误不能冒泡 (曾导致整个注入失败)
+        // 单独跳过
         var sheets = document.styleSheets;
         for (var si = 0; si < sheets.length; si++) {
             var sheet = sheets[si];
@@ -569,9 +567,7 @@ function installPreviewTheme() {
                 continue;   // 跨域 sheet 跳过
             }
             if (!rules) continue;
-            try {
-                rewriteRules(rules, out);
-            } catch (e) {}
+            rewriteRules(rules, out);
         }
         if (!out.length) return;
 
@@ -594,51 +590,29 @@ function removePreviewTheme() {
         _previewThemeStyle = null;
     }}
 
-/** 预览容器 padding 与编辑器写作区 (#write) 对齐: 实测 computed padding
- * 写入容器 CSS 变量。写作区 padding 由主题提供 (如 30px 30px 100px 30px),
- * 基础规则 `16px 24px 40px` 特异性更高会盖住注入的主题 padding — 直接
- * 同步实测值, 与编辑器严格一致。同时读取 #write 文字色给预览公式
- * (mjx-container) — 预览容器用 --text-color (claude 主题下是侧边栏
- * 浅灰 #3d3d3a), MathJax fill=currentColor 跟随 → 公式偏浅; 只校正
- * 公式颜色, 正文文字保持预览容器色 */
-function syncPreviewPadding() {
-    if (!_els.container) return;
-    var pad = null;
-    var mcolor = null;
-    try {
-        var writeEl = document.querySelector("#write");
-        if (writeEl) {
-            var cs = getComputedStyle(writeEl);
-            pad = cs.padding;
-            mcolor = cs.color;
-        }
-    } catch (e) {}
-    if (pad) _els.container.style.setProperty("--bt-preview-pad", pad);
-    else _els.container.style.removeProperty("--bt-preview-pad");
-    if (mcolor) _els.container.style.setProperty("--bt-math-color", mcolor);
-    else _els.container.style.removeProperty("--bt-math-color");
-}
-
 var _lastSbw = -1;
 
-/** 预览容器滚动条占宽补偿: Typora 编辑器 #write 内容区宽 = 滚动容器
- * offsetWidth - padding (滚动条不占写作区宽, 实测 #write clientW ==
- * content offsetW), 预览容器滚动条占 clientWidth → 行宽窄一个滚动条宽。
- * 实测滚动条宽 (offsetW - clientW), 从 padding-right 扣除, 行宽与编辑器一致 */
+/** 滚动条占宽补偿: Typora 编辑器 #write 内容区宽 = 滚动容器 offsetWidth
+ * - padding (滚动条不占写作区宽, 实测 #write clientW == content offsetW),
+ * 预览滚动层 clientWidth 被滚动条占掉 → 内容层行宽窄一个滚动条宽。
+ * 实测滚动层滚动条宽, 从内容层 (.bt-write-clone) padding-right 扣除,
+ * 行宽与编辑器一致。padding 由主题注入 (#write 规则), 补偿仅扣差值 */
 function syncPreviewSbw() {
     if (!_active) return;
     var list = [_els.leftContent, _els.rightContent];
     for (var i = 0; i < list.length; i++) {
-        var el = list[i];
+        var el = list[i];                    // 外层滚动容器
         if (!el) continue;
-        var sbw = el.offsetWidth - el.clientWidth;
+        var sbw = el.offsetWidth - el.clientWidth;   // 滚动条占宽
         if (sbw < 0) sbw = 0;
-        if (el.__btSbw === sbw) continue;   // 无变化跳过 (避免重排)
-        el.__btSbw = sbw;
-        el.style.paddingRight = "";          // 恢复主题 padding-right
+        var inner = el.querySelector(".bt-write-clone");
+        if (!inner) continue;
+        if (inner.__btSbw === sbw) continue;  // 无变化跳过 (避免重排)
+        inner.__btSbw = sbw;
+        inner.style.paddingRight = "";        // 恢复主题 padding-right
         var pr = 0;
-        try { pr = parseFloat(getComputedStyle(el).paddingRight) || 0; } catch (e) {}
-        el.style.paddingRight = Math.max(0, pr - sbw) + "px";
+        try { pr = parseFloat(getComputedStyle(inner).paddingRight) || 0; } catch (e) {}
+        inner.style.paddingRight = Math.max(0, pr - sbw) + "px";
     }
 }
 
@@ -822,9 +796,6 @@ function enable() {
     _activeSide = "left";
     _pendingSide = null;
 
-    // 首次预览渲染前就位: 公式色/padding 变量 (MathJax fill 在渲染时
-    // 固化, 变量后置会让首次渲染的公式固化浅色, 之后改 CSS 不变色)
-    syncPreviewPadding();
     measureLayout();
     syncEditor();
     syncPanes();
@@ -833,8 +804,7 @@ function enable() {
     installPreviewTheme();
     _themeUnsub = window.BetterTypora.theme.onChange(function () {
         installPreviewTheme();
-        syncPreviewPadding();
-        // 主题切换后重渲染预览: 公式 fill 固化渲染时的颜色
+        // 公式 fill 固化渲染时的颜色, 主题切换后重渲染预览
         syncPanes();
     });
     bindEvents();

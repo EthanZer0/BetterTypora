@@ -1745,7 +1745,16 @@
                 if (!container) return false;
                 var html = parse(md);
                 if (html === null) return false;
-                container.innerHTML = html;
+                // 内容层包裹: 镜像编辑器 #write 结构。主题注入按
+                // .bt-write-clone 重写 #write 规则 — 布局属性作用于内容层
+                // 不破坏外层滚动容器, 注入无需白名单过滤。附加 write class:
+                // Typora 编辑器的 #write 带 write class, 主题的 .write 前缀
+                // 全局规则 (如 claude 表格边框 .write th/td) 因此生效
+                var inner = document.createElement("div");
+                inner.className = "bt-write-clone write";
+                inner.innerHTML = html;
+                container.innerHTML = "";
+                container.appendChild(inner);
 
                 // 预览容器禁编辑 (Typora 输出 contenteditable="true")
                 var edits = container.querySelectorAll('[contenteditable="true"]');

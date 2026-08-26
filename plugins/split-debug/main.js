@@ -266,11 +266,56 @@ function installMathStateProbe() {
     });
 }
 
+/* =====================================================================
+ * v0.14 — 表格样式对比: 编辑器 vs 预览 (claude 主题表格未正确渲染)
+ * ===================================================================== */
+function installTableProbe() {
+    setTimeout(function () {
+        try {
+            function dump(el, tag) {
+                if (!el) { logger.log("[表格] " + tag + " 不存在"); return; }
+                var cs = getComputedStyle(el);
+                logger.log("[表格] " + tag +
+                    " | display=" + cs.display +
+                    " | collapse=" + cs.borderCollapse +
+                    " | border=" + cs.borderTopWidth + "/" + cs.borderBottomWidth + " " + cs.borderBottomStyle + " " + cs.borderBottomColor +
+                    " | width=" + cs.width + " | margin=" + cs.marginTop + "/" + cs.marginBottom);
+            }
+            var et = document.querySelector("#write table");
+            var pt = document.querySelector(".bt-write-clone table");
+            dump(et, "编辑器table");
+            dump(pt, "预览table");
+            var etc = et ? getComputedStyle(et.querySelector("td") || et) : null;
+            var ptc = pt ? getComputedStyle(pt.querySelector("td") || pt) : null;
+            if (etc && ptc) {
+                logger.log("[表格] 编辑器td: " + etc.borderBottomWidth + " " + etc.borderBottomStyle + " " + etc.borderBottomColor +
+                    " | pad=" + etc.paddingTop + "/" + etc.paddingRight +
+                    " | 预览td: " + ptc.borderBottomWidth + " " + ptc.borderBottomStyle + " " + ptc.borderBottomColor +
+                    " | pad=" + ptc.paddingTop + "/" + ptc.paddingRight);
+            }
+            // 注入规则里表格相关条数
+            var styleEl = document.getElementById("bt-preview-theme");
+            var n = 0;
+            var tdRules = [];
+            if (styleEl) {
+                var txt = styleEl.textContent || "";
+                n = (txt.match(/bt-write-clone[^{]*table/g) || []).length;
+                tdRules = txt.match(/[^{}]*bt-write-clone[^{]*(?:th|td)[^{}]*\{[^}]*\}/g) || [];
+            }
+            logger.log("[表格] 注入规则含 table 选择器: " + n + " 条, 含 th/td: " + tdRules.length + " 条");
+            if (tdRules.length) {
+                logger.log("[表格] 注入th/td规则样例: " + tdRules.slice(0, 2).join(" || ").slice(0, 600));
+            }
+        } catch (e) { logger.log("[表格] 错误: " + e.message); }
+    }, 2000);
+}
+
 exports.onLoad = function () {
     api.registerCommand("trace", run, "滚动恢复链路追踪");
     installLayoutProbe();
     installScrollbarProbe();
     installMathColorProbe();
     installMathStateProbe();
-    logger.log("split-debug v0.12 已加载: trace + 布局 + 滚动条 + 公式颜色 + 公式状态");
+    installTableProbe();
+    logger.log("split-debug v0.14 已加载: trace + 布局 + 滚动条 + 公式 + 表格");
 };

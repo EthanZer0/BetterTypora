@@ -110,42 +110,30 @@
 
 /* ===================================================================
  * 预览区 (Typora 原生渲染) — 左右栏共用
- * 语法样式由 installPreviewTheme 注入的主题 CSS 提供 (与编辑器一致),
- * 此处只保留布局基础 (容器/居中/行高) 与空状态/元数据块/CodeMirror
+ * 双层结构: .bt-split-preview 是滚动层 (滚动/背景/让位),
+ * .bt-write-clone 是内容层 (镜像编辑器 #write, 主题规则原样注入,
+ * 不设任何基础规则 — 完全交给 installPreviewTheme)
  * =================================================================== */
 #bt-split-container .bt-split-preview {
     flex: 1;
     overflow: auto;
-    /* padding 与编辑器写作区一致: JS 同步 #write 实测 padding 到
-       --bt-preview-pad (主题切换时更新); 变量未就绪时兜底 */
-    padding: var(--bt-preview-pad, 16px 24px 40px);
-    color: var(--text-color, #333);
-    /* font-family 不设 — 继承 body 的主题字体 (显式 var(--font-sans,
-       system-ui) 会挡住主题字体继承, 曾导致预览字体与编辑器不同) */
+    background: var(--bg-color, #ffffff);
+    /* font-family/color 不设 — 内容层继承主题注入的 #write 规则,
+       滚动空白区无文字无需文字色 */
 }
-#bt-split-container .bt-split-preview .bt-md {
-    /* 内容宽度与编辑器写作区一致: 不设 max-width/居中 (编辑器 #write
-       全宽), 内容宽 = 容器宽 - 左右 padding, 与编辑器贴片内 #write 相同 */
-    word-wrap: break-word;
-    /* line-height 不设 — 继承注入的主题行高 (与编辑器一致),
-       自设 1.7 会覆盖主题行高 */
-}
+
+/* 内容层: 无基础规则 — padding/font/color/布局全部由主题注入
+   (#write → .bt-write-clone 原样重写, 与编辑器完全一致) */
 
 /* front matter 元数据块 — 不设样式, 由注入的主题规则生效
-   (#write pre.md-meta-block → .bt-split-preview pre.md-meta-block,
-   与编辑器一致); 自设样式特异性更高会盖住主题 */
+   (#write pre.md-meta-block → .bt-write-clone pre.md-meta-block,
+   与编辑器一致); 装饰性伪元素 (YAML 标签等) 依赖的 position 已随
+   原样注入保留 */
 
 /* 隐藏 Typora 图片语法标记 (md-meta: ![alt](src)) — 编辑器里由主题
- * CSS (#write 前缀) 隐藏, 预览容器不在 #write 内不继承, 需自带 */
+ * CSS (#write 前缀) 隐藏, 内容层同样由注入覆盖; 此处兜底 */
 #bt-split-container .bt-split-preview .md-image .md-meta {
     display: none;
-}
-
-/* 公式颜色与编辑器一致: JS 同步 #write 实测色到 --bt-math-color。
- * 预览容器用 --text-color (claude 主题下是侧边栏浅灰 #3d3d3a),
- * MathJax fill=currentColor 跟随 → 公式偏浅; 只校正公式, 正文不变 */
-#bt-split-container .bt-split-preview mjx-container {
-    color: var(--bt-math-color, currentColor);
 }
 
 /* ===================================================================
