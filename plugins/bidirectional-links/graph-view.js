@@ -69,6 +69,12 @@
     GraphView.prototype.open = function (container) {
         if (this._destroyed || this._isOpen) return;
 
+        // 嵌入容器已脱离文档 (分屏关闭销毁 DOM) → 视为无嵌入容器,
+        // 全屏模式挂 body; 否则 overlay 会挂到 detached 容器, 图谱不显示
+        if (this._embedContainer && !document.contains(this._embedContainer)) {
+            this._embedContainer = null;
+        }
+
         // 嵌入模式: 挂载到指定容器 (无遮罩, 面板铺满), 复用 overlay 结构
         if (container) this._embedContainer = container;
 

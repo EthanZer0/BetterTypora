@@ -263,6 +263,14 @@ function findRightTab(filePath) {
     return -1;
 }
 
+/** 右栈中图谱标签索引 (无则 -1) */
+function findGraphTab() {
+    for (var i = 0; i < _rightTabs.length; i++) {
+        if (isGraphTab(_rightTabs[i])) return i;
+    }
+    return -1;
+}
+
 function addRightTab(filePath) {
     var idx = findRightTab(filePath);
     if (idx >= 0) {
@@ -321,6 +329,18 @@ function afterRightTabsChanged() {
     applyRightPane();
 }
 
+/** 图谱标签图标 — 节点连线图 (currentColor 跟随主题文字色; 三点斜向散落) */
+var GRAPH_ICON_SVG =
+    '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" ' +
+    'style="vertical-align:-2px;margin-right:5px;flex-shrink:0">' +
+    '<line x1="3.5" y1="3.5" x2="11.5" y2="6.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+    '<line x1="11.5" y1="6.5" x2="5.5" y2="11.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+    '<line x1="5.5" y1="11.5" x2="3.5" y2="3.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+    '<circle cx="3.5" cy="3.5" r="1.8" fill="currentColor"/>' +
+    '<circle cx="11.5" cy="6.5" r="1.8" fill="currentColor"/>' +
+    '<circle cx="5.5" cy="11.5" r="1.8" fill="currentColor"/>' +
+    "</svg>";
+
 function renderRightTabs() {
     _els.tabs.innerHTML = "";
     for (var i = 0; i < _rightTabs.length; i++) {
@@ -331,7 +351,11 @@ function renderRightTabs() {
             chip.setAttribute("data-idx", idx);
             var label = document.createElement("span");
             label.className = "typora-tab-label";
-            label.textContent = t.name;
+            if (isGraphTab(t)) {
+                label.innerHTML = GRAPH_ICON_SVG + "知识图谱";
+            } else {
+                label.textContent = t.name;
+            }
             var closeBtn = document.createElement("span");
             closeBtn.className = "typora-tab-close";
             closeBtn.textContent = "×";
@@ -932,6 +956,12 @@ function mountGraphPane() {
     // 图谱模式: 右栏内容区提升层级 (z-index 62 > 编辑器贴片 60),
     // 图谱盖住贴片独占右栏 — 编辑器不迁移, 左栏保持原状
     container.classList.add("graph-active");
+    // 图谱已挂载在容器中 (图谱标签重复激活) → 不重建: 若走清空 +
+    // open 重建, graphView 因 _isOpen 幂等直接 return, 图谱反而变空白
+    if (_graphView && typeof _graphView.isOpen === "function" &&
+        _graphView.isOpen() && container.querySelector("#graph-view-overlay")) {
+        return;
+    }
     // 先清空容器, 再挂载 — embed-graph 命令内部会 open(container),
     // 顺序颠倒会把刚挂载的 overlay 清掉 (detached DOM → 图谱空白)
     container.innerHTML = "";
@@ -983,10 +1013,24 @@ function addGraphTab() {
         }
     } catch (e) {}
     // 图谱中心跟随编辑器当前文件 (Obsidian 语义), 无需来源字段
-    _rightTabs.push({ type: "graph", name: "🕸 知识图谱" });
+    _rightTabs.push({ type: "graph", name: "知识图谱" });
     _rightActive = _rightTabs.length - 1;
     renderRightTabs();
     applyRightPane();
+}
+
+/** 分屏图谱打开命令 (bidirectional-links 图谱按钮/热键调用):
+ *  1) 图谱标签已存在 → 激活; 2) 无 → 新建; 3) 分屏未开 → 返回 null,
+ *  调用方回退全屏 toggle */
+function openGraphFromCommand() {
+    if (!_active) return null;
+    var gIdx = findGraphTab();
+    if (gIdx >= 0) {
+        if (_rightActive !== gIdx) selectRightTab(gIdx);
+        return true;   // 已激活 → 图谱正在显示, 无需操作
+    }
+    addGraphTab();
+    return true;
 }
 
 function renderPreviewInto(container, filePath) {
@@ -1187,9 +1231,11 @@ function disable() {
     _closedStack = [];
     _leftPreviewPath = null;
     window.BetterTypora.scroll.clear();   // 清空记录, 避免分屏关闭后注入旧值
-    // 图谱面板彻底销毁
-    if (_graphView && typeof _graphView.destroy === "function") {
-        try { _graphView.destroy(); } catch (e) {}
+    // 图谱面板关闭 (close 已释放 GPU/worker/模拟资源)。不能用 destroy —
+    // graphView 是 bidirectional-links 的模块级单例, destroy 会永久终结
+    // (后续反链图谱按钮/全屏打开全部失效)
+    if (_graphView && typeof _graphView.close === "function") {
+        try { _graphView.close(); } catch (e) {}
     }
     _graphView = null;
     removePreviewTheme();
@@ -1436,6 +1482,8 @@ exports.onLoad = function () {
     api.registerCommand("send-file", function (filePath) {
         sendToRight(filePath);
     }, "发送指定文件到右栏 (tabs 菜单调用)");
+    api.registerCommand("open-graph", openGraphFromCommand,
+        "在分屏打开知识图谱 (图谱标签激活/新建; 分屏未开返回 null 回退全屏)");
     logger.log("分屏插件已加载 (split-view:toggle 开启)");
 };
 

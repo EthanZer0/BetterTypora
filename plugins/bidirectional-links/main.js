@@ -863,6 +863,12 @@ module.exports = {
             }, PLUGIN_DIR);
         }
         api.registerCommand("graph-view", function () {
+            // 分屏优先: 图谱标签激活/新建。split-view 返回 truthy 表示
+            // 已处理; 分屏未开返回 null → 回退全屏 toggle
+            try {
+                var handled = window.BetterTypora.commands.execute("split-view:open-graph");
+                if (handled) return;
+            } catch (e) {}
             if (graphView) graphView.toggle();
         }, "打开知识图谱");
         api.registerHotkey("bidirectional-links:graph-view", "Ctrl+Shift+G", "editorFocus");
