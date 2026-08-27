@@ -7,7 +7,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -TyporaDir "D:\Tools\Typora\resources"
 #
 # 功能:
-#   1. 自动定位 Typora 的 resources 目录 (运行进程 / 常见安装路径 / 显式指定)
+#   1. 自动定位 Typora 的 resources 目录 (运行进程 / 注册表卸载信息 / 显式指定)
 #   2. 备份 window.html → window.html.bettertypora.bak
 #   3. 幂等注入 <script src="./plugins/plugin-loader.js"> (已注入则跳过)
 #   4. 复制 plugins/ 目录 (含 plugin-loader.js)
@@ -46,16 +46,32 @@ function Find-TyporaResources {
             if (Test-Path $res) { return $res }
         }
     } catch {}
-    # 2. 常见安装路径
-    $candidates = @(
-        "$env:ProgramFiles\Typora\resources",
-        "${env:ProgramFiles(x86)}\Typora\resources",
-        "$env:LOCALAPPDATA\Programs\Typora\resources",
-        "$env:LOCALAPPDATA\Typora\resources",
-        "$env:USERPROFILE\scoop\apps\typora\current\resources"
+    # 2. 注册表卸载信息 (安装器写入的权威路径, 覆盖标准安装位置)
+    $uninstallKeys = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Typora",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Typora",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Typora"
     )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path $c)) { return $c }
+    foreach ($k in $uninstallKeys) {
+        try {
+            if (-not (Test-Path $k)) { continue }
+            $prop = Get-ItemProperty $k -ErrorAction SilentlyContinue
+            # InstallLocation: "C:\Program Files\Typora"
+            $loc = $prop.InstallLocation
+            if ($loc -and (Test-Path $loc)) {
+                $res = Join-Path $loc "resources"
+                if (Test-Path $res) { return $res }
+            }
+            # DisplayIcon: "C:\Program Files\Typora\Typora.exe" (可能带 ,0 参数)
+            $icon = $prop.DisplayIcon
+            if ($icon) {
+                $exe = (($icon -split ",")[0]).Trim('"').Trim()
+                if ($exe -and (Test-Path $exe)) {
+                    $res = Join-Path (Split-Path -Parent $exe) "resources"
+                    if (Test-Path $res) { return $res }
+                }
+            }
+        } catch {}
     }
     return $null
 }
