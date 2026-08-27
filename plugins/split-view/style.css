@@ -81,6 +81,12 @@
     position: relative;
 }
 
+/* 图谱模式: 右栏内容区提升层级盖住编辑器贴片 (贴片 fixed z-index 60),
+ * 图谱独占右栏且编辑器不迁移 — 左栏保持原状 */
+#bt-split-container #bt-split-right-content.graph-active {
+    z-index: 62;
+}
+
 /* ===================================================================
  * 右栏标签条容器 (chip 样式复用 tabs 插件的全局 .typora-tab-chip,
  * 继承属性对齐 #typora-tab-bar, 保证观感一致)

@@ -231,6 +231,18 @@ function applyRightPane() {
         return;
     }
     if (isGraphTab(tab)) {
+        // 图谱标签激活: 图谱中心 = 标签来源文件 (右栏上下文), 不随
+        // 编辑器当前文件; 编辑器贴片若在右栏 (fixed z60, 容器 z50 内
+        // 无法盖过) 先迁移左栏 — 打开左栏上下文文件, 左栏保持原内容
+        if (_activeSide === "right") {
+            var lf = _leftPreviewPath;
+            if (lf && lf !== BetterTypora.getCurrentFile()) {
+                _pendingSide = "left";
+                BetterTypora.openFile(lf);
+            } else {
+                doActivate("left");
+            }
+        }
         mountGraphPane();
         return;
     }
@@ -727,6 +739,9 @@ var _graphView = null;   // bidirectional-links 的 GraphView 实例 (嵌入模�
 function mountGraphPane() {
     var container = _els.rightContent;
     if (!container) return;
+    // 图谱模式: 右栏内容区提升层级 (z-index 62 > 编辑器贴片 60),
+    // 图谱盖住贴片独占右栏 — 编辑器不迁移, 左栏保持原状
+    container.classList.add("graph-active");
     // 先清空容器, 再挂载 — embed-graph 命令内部会 open(container),
     // 顺序颠倒会把刚挂载的 overlay 清掉 (detached DOM → 图谱空白)
     container.innerHTML = "";
@@ -737,6 +752,12 @@ function mountGraphPane() {
         } else if (typeof _graphView.open === "function") {
             _graphView.open(container);
         }
+        // 图谱中心跟随来源文件 (渲染器未就绪时 setCenter 内部挂起,
+        // 构建完成后自动应用)
+        var tab = activeRightTab();
+        if (tab && isGraphTab(tab) && tab.source) {
+            try { _graphView.setCenter(tab.source); } catch (e) {}
+        }
     } catch (e) {
         logger.log("图谱挂载失败: " + e.message);
     }
@@ -744,15 +765,22 @@ function mountGraphPane() {
 
 /** 图谱从右栏内容区卸载 (切到文件标签/关闭图谱标签时) */
 function unmountGraphPane() {
+    if (_els.rightContent) _els.rightContent.classList.remove("graph-active");
     if (_graphView && typeof _graphView.close === "function") {
-        logger.log("[图谱] unmount 被调用 (applyRightPane/syncPanes 路径)");
         try { _graphView.close(); } catch (e) {}
     }
 }
 
-/** 图谱中心节点跟随当前文件 */
+/** 图谱中心节点: 图谱标签 → 来源文件 (右栏上下文); 否则跟随当前文件 */
 function syncGraphCenter() {
     if (!_graphView || typeof _graphView.setCenter !== "function") return;
+    var tab = activeRightTab();
+    if (isGraphTab(tab)) {
+        if (tab.source) {
+            try { _graphView.setCenter(tab.source); } catch (e) {}
+        }
+        return;
+    }
     var cur = BetterTypora.getCurrentFile();
     if (cur) {
         try { _graphView.setCenter(cur); } catch (e) {}
@@ -770,7 +798,12 @@ function addGraphTab() {
             return;
         }
     } catch (e) {}
-    _rightTabs.push({ type: "graph", name: "🕸 知识图谱" });
+    // 图谱中心来源 = 当前右栏激活的文件标签 (右栏上下文)
+    var src = null;
+    if (_rightActive >= 0 && !isGraphTab(_rightTabs[_rightActive])) {
+        src = _rightTabs[_rightActive].path;
+    }
+    _rightTabs.push({ type: "graph", name: "🕸 知识图谱", source: src });
     _rightActive = _rightTabs.length - 1;
     renderRightTabs();
     applyRightPane();
@@ -792,6 +825,14 @@ function renderPreviewInto(container, filePath) {
 function syncPanes() {
     if (_activeSide === "left") {
         // 左栏被编辑器贴片覆盖; 右栏渲染预览
+        var act = activeRightTab();
+        if (isGraphTab(act)) {
+            // 右栏是图谱标签 — 图谱已挂载 (applyRightPane), 跳过右栏
+            // 预览渲染; 异步迁移 (openFile → opened → doActivate) 的
+            // syncPanes 不能把图谱卸载成"此栏无文件"
+            _els.leftContent.innerHTML = "";
+            return;
+        }
         unmountGraphPane();   // 右栏内容区将重建, 图谱先卸载 (防 DOM 清空状态残留)
         _els.leftContent.innerHTML = "";
         var fp = _rightActive >= 0 ? _rightTabs[_rightActive].path : null;

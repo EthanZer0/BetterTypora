@@ -172,10 +172,18 @@
 
     /** 高亮中心节点 (实时跟随当前文件) */
     GraphView.prototype.setCenter = function (filePath) {
-        if (!this._renderer || !filePath) return;
+        if (!filePath) return;
+        // 渲染器/图未就绪时挂起, 构建完成后自动应用
+        this._pendingCenter = filePath;
+        if (!this._renderer || !this._nodesById) return;
         var node = this._nodesById[filePath];
         this._renderer._selId = node ? node.id : null;
         this._renderer.tick();
+    };
+
+    /** 构建完成后应用挂起的中心节点 */
+    GraphView.prototype._applyPendingCenter = function () {
+        if (this._pendingCenter) this.setCenter(this._pendingCenter);
     };
 
     GraphView.prototype.destroy = function () {
@@ -860,6 +868,9 @@
         this._bindSettings();
 
         this._startSimulation();
+
+        // 挂起的中心节点 (mountGraphPane 在渲染器就绪前调 setCenter)
+        this._applyPendingCenter();
 
         // 更新统计
         var statsEl = document.getElementById("graph-stats");
