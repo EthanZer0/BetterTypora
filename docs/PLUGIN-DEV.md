@@ -575,19 +575,33 @@ BetterTypora 是开源项目，可自由使用和修改。许可证见仓库主�
 
 ### A.4 JS 主题检测规范
 
-如必须在 JS 中判断亮/暗：
+如必须在 JS 中判断亮/暗或订阅主题切换，**优先使用 BetterTypora 封装的主题服务**（内部读 Typora 真实 CSS 变量 + 指纹轮询，与编辑器一致，勿重复实现）：
 
 ```js
-// ✅ 正确：读 Typora 主题的真实背景亮度
+// ✅ 正确：官方封装 — 读 Typora 主题的真实背景亮度
+var dark = BetterTypora.theme.isDark();            // → bool
+BetterTypora.theme.onChange(function (p) {        // → 主题切换 (换主题文件/亮暗), 返回解绑函数
+    // p: {isDark, sidebarTabsMode, slots}
+    rerunThemeAdaptation();
+});
+BetterTypora.theme.getSidebarTabsMode()           // → "capsule" | "default" | null — 胶囊标签栏形态
+BetterTypora.theme.getSidebarTabSlots()           // → {激活态类名: 滑块位移px} — 胶囊滑块档位
+```
+
+- **不要自己轮询 CSS 变量**——`theme.onChange` 已封装指纹对比，且只在有订阅者时才启动轮询（零空闲开销）
+- 胶囊主题适配（滑块跟随插件标签）用 `getSidebarTabsMode`/`getSidebarTabSlots`，参考 bidirectional-links 的 `.bt-capsule` 模式（插件标签槽 `width:max-content` + JS 写 `--bt-tab-x` 变量驱动滑块）
+- 仅在**无法访问 `BetterTypora` 的独立模块**（如 Web Worker、离线渲染器）中才允许手写亮度解析（参考 graph-renderer.js 的 `_parseLuminance()`）
+
+```js
+// ❌ 错误：读 OS 设置 (Typora 亮暗与 OS 无关)
+var isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+// ⚠ 仅在独立模块中可接受：手写亮度解析
 function isThemeDark() {
     var bg = getComputedStyle(document.documentElement)
         .getPropertyValue("--bg-color").trim();
-    // 解析亮度 (ITU-R BT.601)，< 0.5 为暗色
-    // ... 参见 graph-renderer.js 中的 _parseLuminance()
+    return luminance(bg) < 0.5;   // ITU-R BT.601
 }
-
-// ❌ 错误：读 OS 设置
-var isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 ```
 
 ### A.5 审查清单
@@ -596,6 +610,7 @@ var isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 - [ ] 无 `@media (prefers-color-scheme: dark)` 或 `(prefers-color-scheme: light)`
 - [ ] 无 `window.matchMedia("(prefers-color-scheme: ...)"`
+- [ ] JS 亮暗检测/主题切换使用 `BetterTypora.theme`（未自行轮询 CSS 变量或手写解析，独立模块除外）
 - [ ] 所有 `var(--heading-text-color, ...)` 回退链经过 `--text-color` 桥接
 - [ ] 所有 `var(--active-file-text-color, ...)` 回退链经过 `--text-color` 桥接
 - [ ] 所有硬编码颜色值为中性灰或 CSS 变量（避免 `rgba(0,0,0,N)` 和 `rgba(255,255,255,N)`）
