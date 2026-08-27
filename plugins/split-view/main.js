@@ -752,12 +752,12 @@ function mountGraphPane() {
         } else if (typeof _graphView.open === "function") {
             _graphView.open(container);
         }
-        // 图谱中心跟随来源文件 (渲染器未就绪时 setCenter 内部挂起,
+        // 图谱中心跟随当前文件 (渲染器未就绪时 setCenter 内部挂起,
         // 构建完成后自动应用)
-        var tab = activeRightTab();
-        if (tab && isGraphTab(tab) && tab.source) {
-            try { _graphView.setCenter(tab.source); } catch (e) {}
-        }
+        try {
+            var cur = BetterTypora.getCurrentFile();
+            if (cur) _graphView.setCenter(cur);
+        } catch (e) {}
     } catch (e) {
         logger.log("图谱挂载失败: " + e.message);
     }
@@ -771,16 +771,10 @@ function unmountGraphPane() {
     }
 }
 
-/** 图谱中心节点: 图谱标签 → 来源文件 (右栏上下文); 否则跟随当前文件 */
+/** 图谱中心节点: 跟随编辑器当前文件 (Obsidian 语义 — 一栏书写,
+ * 图谱实时渲染书写中的文件; 图谱标签激活时同样跟随) */
 function syncGraphCenter() {
     if (!_graphView || typeof _graphView.setCenter !== "function") return;
-    var tab = activeRightTab();
-    if (isGraphTab(tab)) {
-        if (tab.source) {
-            try { _graphView.setCenter(tab.source); } catch (e) {}
-        }
-        return;
-    }
     var cur = BetterTypora.getCurrentFile();
     if (cur) {
         try { _graphView.setCenter(cur); } catch (e) {}
@@ -798,12 +792,8 @@ function addGraphTab() {
             return;
         }
     } catch (e) {}
-    // 图谱中心来源 = 当前右栏激活的文件标签 (右栏上下文)
-    var src = null;
-    if (_rightActive >= 0 && !isGraphTab(_rightTabs[_rightActive])) {
-        src = _rightTabs[_rightActive].path;
-    }
-    _rightTabs.push({ type: "graph", name: "🕸 知识图谱", source: src });
+    // 图谱中心跟随编辑器当前文件 (Obsidian 语义), 无需来源字段
+    _rightTabs.push({ type: "graph", name: "🕸 知识图谱" });
     _rightActive = _rightTabs.length - 1;
     renderRightTabs();
     applyRightPane();
@@ -1036,6 +1026,8 @@ function onFileOpened(data) {
     // openFile 触发 tabs 插件 addOrActivate 激活被排除的发送文件
     // (不可见) — 覆盖左栏预览邻近标签的高亮; 打开完成后重新同步
     resyncTabHighlight();
+    // 图谱中心跟随当前文件 (右栏图谱标签激活时, 左栏切换文件实时跟随)
+    syncGraphCenter();
 }
 
 /** 挂起迁移: 目标文件加载完成 → 迁移贴片。

@@ -172,7 +172,7 @@
 
     /** 高亮中心节点 (实时跟随当前文件) */
     GraphView.prototype.setCenter = function (filePath) {
-        if (!filePath) return;
+        if (!filePath || !this._isOpen) return;
         // 渲染器/图未就绪时挂起, 构建完成后自动应用
         this._pendingCenter = filePath;
         if (!this._renderer || !this._nodesById) return;
