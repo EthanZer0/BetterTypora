@@ -247,6 +247,7 @@ function installFileOpenListener() {
             scheduleGraphRefresh();
         });
     }
+    installGraphThemeSync();
     logger.log("已注册文件切换监听");
 }
 
@@ -258,6 +259,10 @@ function uninstallFileOpenListener() {
     if (_onSavedUnsub) {
         BetterTypora.offFileEvent("saved", _onSavedUnsub);
         _onSavedUnsub = null;
+    }
+    if (_themeUnsub) {
+        try { _themeUnsub(); } catch (e) {}
+        _themeUnsub = null;
     }
 }
 
@@ -670,6 +675,27 @@ var _persistTimer = null;
 
 // 图谱防抖刷新 (Obsidian 式: 增量更新保留位置, 索引未就绪回退事件等待)
 var _graphRefreshTimer = null;
+var _themeUnsub = null;
+
+/** 图谱主题适配: 背景色跟随 --bg-color + 主题切换刷新。
+ *  Typora 主题 CSS 应用可能晚于 onChange 事件 (onChange 时 --bg-color
+ *  仍是旧值) — 延迟多级刷新, 覆盖 CSS 变量更新的时间窗口 */
+function installGraphThemeSync() {
+    if (_themeUnsub || !window.BetterTypora.theme) return;
+    function refresh() {
+        try {
+            if (graphView && graphView.isOpen && graphView.isOpen() &&
+                typeof graphView.onThemeChange === "function") {
+                graphView.onThemeChange();
+            }
+        } catch (e) {}
+    }
+    _themeUnsub = window.BetterTypora.theme.onChange(function () {
+        setTimeout(refresh, 150);
+        setTimeout(refresh, 500);
+    });
+}
+
 function scheduleGraphRefresh() {
     if (!graphView || !graphView.isOpen || !graphView.isOpen()) return;
     if (_graphRefreshTimer) _timers.clearTimeout(_graphRefreshTimer);

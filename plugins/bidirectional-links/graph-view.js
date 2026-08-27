@@ -170,6 +170,14 @@
         this._startSimulation();
     };
 
+    /** 主题切换: 刷新图谱背景等主题相关渲染 (模拟可能已停止,
+     *  需要显式标记重绘) */
+    GraphView.prototype.onThemeChange = function () {
+        if (!this._renderer) return;
+        if (this._renderer.refreshTheme) this._renderer.refreshTheme();
+        else this._renderer.tick();
+    };
+
     /** 高亮中心节点 (实时跟随当前文件) */
     GraphView.prototype.setCenter = function (filePath) {
         if (!filePath || !this._isOpen) return;

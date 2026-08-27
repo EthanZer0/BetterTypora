@@ -310,6 +310,40 @@ function installTableProbe() {
     }, 2000);
 }
 
+/* =====================================================================
+ * v0.16 — 主题探针: 监测 --bg-color 变化时序 (onChange 触发时刻 vs
+ * CSS 变量实际更新时刻), 定位图谱背景主题刷新失败
+ * ===================================================================== */
+function installThemeProbe() {
+    function readBg() {
+        try {
+            return getComputedStyle(document.documentElement)
+                .getPropertyValue("--bg-color").trim();
+        } catch (e) { return "?"; }
+    }
+    var t0 = Date.now();
+    var initial = readBg();
+    logger.log("[主题探针] 初始 --bg-color=" + initial + " @0ms");
+    var last = initial;
+    setInterval(function () {
+        var v = readBg();
+        if (v !== last) {
+            last = v;
+            logger.log("[主题探针] --bg-color 变化 → " + v + " @" + (Date.now() - t0) + "ms");
+        }
+    }, 100);
+    try {
+        if (window.BetterTypora && window.BetterTypora.theme) {
+            window.BetterTypora.theme.onChange(function () {
+                logger.log("[主题探针] theme.onChange 触发 @" + (Date.now() - t0) +
+                    "ms 当时 bg=" + readBg());
+            });
+        }
+    } catch (e) {
+        logger.log("[主题探针] theme 不可用: " + e.message);
+    }
+}
+
 exports.onLoad = function () {
     api.registerCommand("trace", run, "滚动恢复链路追踪");
     installLayoutProbe();
@@ -317,5 +351,6 @@ exports.onLoad = function () {
     installMathColorProbe();
     installMathStateProbe();
     installTableProbe();
-    logger.log("split-debug v0.14 已加载: trace + 布局 + 滚动条 + 公式 + 表格");
+    installThemeProbe();
+    logger.log("split-debug v0.16 已加载: trace + 布局 + 滚动条 + 公式 + 表格 + 主题");
 };

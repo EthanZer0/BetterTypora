@@ -298,8 +298,18 @@
         var pw = this._pxW;
         var ph = this._pxH;
 
-        // 失效检测：主题变化 / dpr 变化 / 尺寸变化 / 首次
+        // 主题背景色 (CSS 变量) — 跟随当前主题 (含同亮度主题切换,
+        // 如 claude 米白 ↔ github 白, isDark 不变但背景色不同)
+        var bgColor = null;
+        try {
+            bgColor = getComputedStyle(document.documentElement)
+                .getPropertyValue("--bg-color").trim();
+        } catch (e) {}
+        if (!bgColor) bgColor = isDark ? "#1A1C22" : "#EEF0F4";
+
+        // 失效检测：主题背景变化 / 明暗变化 / dpr 变化 / 尺寸变化 / 首次
         if (!this._bgCanvas || this._bgDpr !== dpr || this._bgDark !== isDark ||
+            this._bgColorValue !== bgColor ||
             this._bgCanvas.width !== pw || this._bgCanvas.height !== ph) {
 
             var bg = document.createElement("canvas");
@@ -312,10 +322,15 @@
             var ch = ph / dpr;
             var p = isDark ? PALETTE_DARK : PALETTE_LIGHT;
 
-            // 1. 底色
+            // 1. 底色 = 当前主题 --bg-color
             bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            bgCtx.fillStyle = p.COLOR_BG;
+            bgCtx.fillStyle = bgColor;
             bgCtx.fillRect(0, 0, cw, ch);
+            this._bgColorValue = bgColor;
+            if (window.__btGraphBgLog) {
+                console.log("[图谱主题] 背景重建 bg=" + bgColor + " (旧=" +
+                    (this._bgColorValue === bgColor ? "同" : this._bgColorValue) + ")");
+            }
 
             // 2. 点阵图案（确保已创建）
             this._ensureDotPattern();
@@ -1151,6 +1166,15 @@
     GraphRenderer.prototype.tick = function () {
         this._dirty = true;
         // 不在此渲染 — rAF 循环负责绘制，避免双渲染
+    };
+
+    /** 主题切换后刷新: 背景缓存失效 (bgColor 变化在下次 render 检测重建),
+     *  标记重绘 — 即使模拟已停止 (rAF 循环仍在跑) */
+    GraphRenderer.prototype.refreshTheme = function () {
+        this._themeRefreshPending = true;
+        this._bgCanvas = null;
+        this._bgColorValue = null;
+        this.tick();
     };
 
     // ===================================================================

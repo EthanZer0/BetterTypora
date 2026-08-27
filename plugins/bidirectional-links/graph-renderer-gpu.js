@@ -650,8 +650,14 @@
 
         var device = this._device;
 
-        // 用 canvas 尺寸做版本检测
-        var version = bgCanvas.width + "x" + bgCanvas.height;
+        // 版本检测: 尺寸 + 主题背景色 — 主题切换后离屏背景重建 (同尺寸
+        // 不同色), 仅尺寸版本会漏掉更新, GPU 纹理停留在旧主题背景
+        var bgColor = "";
+        try {
+            bgColor = getComputedStyle(document.documentElement)
+                .getPropertyValue("--bg-color").trim();
+        } catch (e) {}
+        var version = bgCanvas.width + "x" + bgCanvas.height + "@" + bgColor;
         if (version === this._bgTextureVersion && this._bgBindGroup) return;
 
         // 首次: 创建纹理 + bindGroup（纹理内容可能空白 1-2 帧，比纯黑好）
