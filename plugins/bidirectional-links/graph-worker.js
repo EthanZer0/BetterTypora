@@ -708,6 +708,17 @@ self.onmessage = function (e) {
             if (!intervalId) scheduleNextTick();
             break;
 
+        case "set_alpha":
+            // 能量注入 (不扰动位置): 重置 alpha 从注入值慢慢衰减到最低 —
+            // 首次显示/重建后让图谱保持活跃运动直至自然收敛
+            if (typeof msg.alpha === "number" && msg.alpha > 0) {
+                alpha = Math.min(1, msg.alpha);
+                alphaTarget = alphaMin;
+                if (!running) running = true;
+            }
+            if (!intervalId) scheduleNextTick();
+            break;
+
         case "unpin":
             if (msg.nodeId) {
                 delete pinnedNodes[msg.nodeId];

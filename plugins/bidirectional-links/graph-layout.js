@@ -309,7 +309,9 @@
 
             if (onTick) onTick(nodes, energy, self._stepCount);
 
-            if (energy < self._energyThreshold) {
+            // 收敛判定加最小步数保护 — 初始能量低 (节点集中/刚重启) 时
+            // 首帧可能就低于阈值而立即停止 → 图谱没扩散完整就不动
+            if (energy < self._energyThreshold && self._stepCount > 60) {
                 self._running = false;
                 if (onDone) onDone();
                 return;

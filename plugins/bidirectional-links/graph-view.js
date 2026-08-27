@@ -777,20 +777,94 @@
         }
     };
 
+    /** 停止模拟/渲染 (refresh/updateFromIndex 共用) */
+    GraphView.prototype._stopSimulation = function () {
+        if (this._layout) this._layout.stop();
+        if (this._renderer) this._renderer.stopRenderLoop();
+        this._stopWorker();
+        this._workerStarted = false;
+        this._rendererGPU = null;
+    };
+
+    /** 注入模拟能量 (不扰动节点位置): 图谱从静止恢复活跃, alpha 从
+     *  注入值慢慢衰减到最低 — 首次显示/重建后保持运动至自然收敛。
+     *  worker 路径: set_alpha 消息; 回退路径: 重启主线程模拟 */
+    GraphView.prototype.injectEnergy = function (level) {
+        if (!this._isOpen || !this._renderer) return;
+        level = level || 1;
+        if (this._useWorker && this._worker) {
+            this._postToWorker({ type: "set_alpha", alpha: level });
+        } else if (this._layout) {
+            try { this._layout.stop(); } catch (e) {}
+            this._runFallbackSimulation();
+        }
+    };
+
     /** 重建图数据与渲染器 (索引就绪后刷新空图) */
     GraphView.prototype.refresh = function () {
         if (!this._isOpen || this._destroyed) return false;
         try {
-            // 停止当前模拟/渲染
-            if (this._layout) this._layout.stop();
-            if (this._renderer) this._renderer.stopRenderLoop();
-            this._stopWorker();
-            this._workerStarted = false;
-            this._rendererGPU = null;
+            this._stopSimulation();
             // 重建图
             this._buildGraph();
             if (!this._nodes || !this._nodes.length) return false;   // 索引仍未就绪
             this._centerAndStart();
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /** 增量更新图 (Obsidian 式): 保留旧节点位置, 新节点从中心 (0,0)
+     *  融入布局, 不重建 renderer/不重置相机 — 编辑增删链接保存后平滑
+     *  更新; 失败 (索引未就绪等) 返回 false, 调用方回退全量重建 */
+    GraphView.prototype.updateFromIndex = function () {
+        var index = this._index;
+        if (!this._isOpen || !this._renderer || !index) return false;
+        if (!index.ready || !index.allMdFiles || !index.allMdFiles.length) return false;
+        try {
+            var result = this._layout.buildFromIndex(
+                index.forwardIndex, index.allMdFiles, this._resolver);
+            var newNodes = result.nodes;
+            if (!newNodes.length) return false;
+
+            // 保留旧节点位置 (id 匹配), 新节点用生成时位置 (0,0 → 视口中心)
+            var oldById = this._nodesById;
+            for (var i = 0; i < newNodes.length; i++) {
+                var nn = newNodes[i];
+                var old = oldById[nn.id];
+                if (old) {
+                    nn.x = old.x;
+                    nn.y = old.y;
+                    nn.vx = 0;
+                    nn.vy = 0;
+                }
+            }
+
+            // 更新内部状态
+            this._nodes = newNodes;
+            this._edges = result.edges;
+            this._nodesById = {};
+            for (var j = 0; j < newNodes.length; j++) {
+                this._nodesById[newNodes[j].id] = newNodes[j];
+            }
+            this._maxDegree = result.maxDegree;
+
+            // renderer 引用/参数更新 (不重建实例, 相机/缩放保持)
+            var r = this._renderer;
+            r._nodes = newNodes;
+            r._edges = this._edges;
+            r._byId = this._nodesById;
+            r._maxDegree = result.maxDegree;
+
+            // worker 重 init (带位置) — 旧节点位置保持, 新节点从中心被
+            // 物理力推入布局; 模拟继续
+            this._stopSimulation();
+            this._startSimulation();
+
+            // 挂起的中心节点
+            this._applyPendingCenter();
+            if (r.tick) r.tick();
             return true;
         } catch (e) {
             return false;
@@ -871,6 +945,9 @@
 
         // 挂起的中心节点 (mountGraphPane 在渲染器就绪前调 setCenter)
         this._applyPendingCenter();
+
+        // 注入模拟能量 — 首次显示/重建后从注入值慢慢衰减, 不扰动位置
+        this.injectEnergy(1);
 
         // 更新统计
         var statsEl = document.getElementById("graph-stats");

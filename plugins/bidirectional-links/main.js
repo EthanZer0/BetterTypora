@@ -668,7 +668,7 @@ function onFileChanged(filePath) {
 
 var _persistTimer = null;
 
-// 图谱防抖刷新 (Obsidian 式: 编辑文件后图谱增量响应)
+// 图谱防抖刷新 (Obsidian 式: 增量更新保留位置, 索引未就绪回退事件等待)
 var _graphRefreshTimer = null;
 function scheduleGraphRefresh() {
     if (!graphView || !graphView.isOpen || !graphView.isOpen()) return;
@@ -676,8 +676,13 @@ function scheduleGraphRefresh() {
     _graphRefreshTimer = _timers.setTimeout(function () {
         _graphRefreshTimer = null;
         try {
-            if (graphView && graphView.isOpen && graphView.isOpen()) {
-                graphView.refresh();
+            if (!graphView.isOpen || !graphView.isOpen()) return;
+            // 增量更新优先 (旧节点保留位置, 新节点融入); 失败时若索引
+            // 就绪则全量重建, 否则 (vault 切换中) 交给 buildIndex 事件
+            if (!graphView.updateFromIndex()) {
+                if (graphView._indexReady && graphView._indexReady(graphView._lastVault)) {
+                    graphView.refresh();
+                }
             }
         } catch (e) {}
     }, 800);
