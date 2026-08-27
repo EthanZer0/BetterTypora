@@ -1251,6 +1251,15 @@
     };
 
     GraphRenderer.prototype._md = function (e) {
+        // 缩放插值进行中 → 立即完成。否则插值期间每帧重写 _ox/_oy,
+        // 拖拽偏移被覆盖清零, 画布拖不动 (必须等缩放动画结束)。
+        // snap 到 _targetS 并按同一锚点公式同步偏移 = 插值自然终态, 无跳变
+        if (this._s !== this._targetS) {
+            this._s = this._targetS;
+            this._ox = this._zoomAnchorSX - this._zoomAnchorX * this._s;
+            this._oy = this._zoomAnchorSY - this._zoomAnchorY * this._s;
+            this._dirty = true;
+        }
         this._dragSX = e.offsetX; this._dragSY = e.offsetY;
         this._dragMoved = false;
         var node = this._hit(e.offsetX, e.offsetY);
