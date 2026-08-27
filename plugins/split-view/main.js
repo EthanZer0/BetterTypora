@@ -340,6 +340,7 @@ function renderRightTabs() {
 
             chip.addEventListener("click", function (ev) {
                 ev.stopPropagation();
+                if (_drag && _drag.moved) return;   // 拖拽结束后的点击忽略
                 if (ev.target === closeBtn) closeRightTab(idx);
                 else selectRightTab(idx);
             });
@@ -348,9 +349,198 @@ function renderRightTabs() {
                 ev.stopPropagation();
                 openCtxMenu(ev.clientX, ev.clientY, idx);
             });
+
+            // --- 拖拽排序: mousedown 填充状态, document 级 mousemove/mouseup 驱动 ---
+            chip.addEventListener("mousedown", function (ev) {
+                if (ev.button !== 0) return;
+                ev.preventDefault();
+                var chipEl = ev.currentTarget;
+                var barRect = _els.tabs.getBoundingClientRect();
+                var allChips = _els.tabs.querySelectorAll(".typora-tab-chip");
+                var snapshot = [];
+                for (var ci = 0; ci < allChips.length; ci++) {
+                    var cr = allChips[ci].getBoundingClientRect();
+                    snapshot.push({ left: cr.left, width: cr.width });
+                }
+                _drag = {
+                    chip: chipEl,
+                    fromIndex: idx,
+                    insertIndex: idx,
+                    startX: ev.clientX,
+                    chipWidth: chipEl.getBoundingClientRect().width,
+                    active: false,
+                    moved: false,
+                    barLeft: barRect.left + 4,
+                    barRight: barRect.right - 4,
+                    snapshot: snapshot
+                };
+            });
             _els.tabs.appendChild(chip);
         })(i);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* 右栏标签拖拽排序 (与 tabs 插件同机制: 快照中点 → 让位 → FLIP 落地)          */
+/* ------------------------------------------------------------------ */
+
+var _drag = null;
+var _dragMove = null;
+var _dragUp = null;
+
+function installRightTabDrag() {
+    if (_dragMove) return;
+
+    // --- document mousemove ---
+    _dragMove = function (e) {
+        var d = _drag;
+        if (!d || !d.chip) return;
+        if (!_els.tabs) { _drag = null; return; }
+        var dx = e.clientX - d.startX;
+
+        if (!d.active && Math.abs(dx) < 5) return;
+        if (!d.active) {
+            d.active = true;
+            d.moved = true;
+            d.chip.classList.add("dragging");
+            d.chip.style.transition = "none";
+        }
+
+        // 夹持到标签条内
+        var clampedX = e.clientX;
+        var minX = d.barLeft;
+        var maxX = d.barRight - d.chipWidth;
+        if (clampedX < minX) clampedX = minX;
+        if (clampedX > maxX) clampedX = maxX;
+
+        d.chip.style.transform = "translateX(" + (clampedX - d.startX) + "px)";
+
+        // 插入位置 — 拖拽芯片边缘 vs 其他芯片原始中点 (快照)
+        var chips = _els.tabs.querySelectorAll(".typora-tab-chip");
+        var chipBase = d.snapshot[d.fromIndex].left + (clampedX - d.startX);
+        // 右移用右边缘, 左移用左边缘, 防止"连体"
+        var chipCompareX = (clampedX >= d.startX) ? chipBase + d.chipWidth : chipBase;
+        var newInsert = d.fromIndex;
+        var found = false;
+        for (var j = 0; j < chips.length; j++) {
+            if (j === d.fromIndex) continue;
+            var snapMid = d.snapshot[j].left + d.snapshot[j].width / 2;
+            if (chipCompareX < snapMid) {
+                newInsert = j;
+                found = true;
+                break;
+            }
+        }
+        // 所有非拖拽芯片都在 clampedX 左侧 → 插入到末尾
+        if (!found) newInsert = chips.length;
+
+        if (newInsert !== d.insertIndex) {
+            d.insertIndex = newInsert;
+
+            // --- 避让动画: 被占位芯片统一偏移 (右栏无空洞, j 即数组索引) ---
+            var slotWidth = d.snapshot[d.fromIndex].width + 2; // +2 为左右 margin (各 1px)
+            for (var k = 0; k < chips.length; k++) {
+                if (k === d.fromIndex) continue;
+                var offset = 0;
+                if (d.fromIndex < newInsert) {
+                    if (k > d.fromIndex && k < newInsert) offset = -slotWidth;
+                } else if (d.fromIndex > newInsert) {
+                    if (k >= newInsert && k < d.fromIndex) offset = slotWidth;
+                }
+                chips[k].style.transform = "translateX(" + offset + "px)";
+                chips[k].classList.add("yielding");
+                chips[k].classList.remove("insert-before");
+            }
+            if (newInsert >= 0 && newInsert < chips.length && newInsert !== d.fromIndex) {
+                var targetChip = _els.tabs.children[newInsert];
+                if (targetChip) targetChip.classList.add("insert-before");
+            }
+        }
+    };
+    document.addEventListener("mousemove", _dragMove);
+
+    // --- document mouseup ---
+    _dragUp = function () {
+        var d = _drag;
+        if (!d || !d.chip) return;
+
+        // 保存拖拽芯片的视觉位置 (用于 FLIP 落地动画)
+        var dragVisualLeft = d.chip.getBoundingClientRect().left;
+        var draggedIdx = d.fromIndex;
+        var positionChanged = d.active && d.insertIndex !== d.fromIndex;
+
+        // 清理视觉
+        d.chip.classList.remove("dragging");
+        var chips = _els.tabs.querySelectorAll(".typora-tab-chip");
+        for (var j = 0; j < chips.length; j++) {
+            chips[j].classList.remove("insert-before", "yielding");
+            chips[j].style.transform = "";
+        }
+
+        // 仅在位置改变时重排
+        if (positionChanged) {
+            var toIndex = d.insertIndex > d.fromIndex ? d.insertIndex - 1 : d.insertIndex;
+            moveRightTab(d.fromIndex, toIndex);
+
+            // FLIP 落地动画: 拖拽芯片从旧视觉位置平滑滑入新 flex 位置
+            var newChip = _els.tabs.querySelector('[data-idx="' + toIndex + '"]');
+            if (newChip) {
+                var newRect = newChip.getBoundingClientRect();
+                var deltaX = dragVisualLeft - newRect.left;
+                if (Math.abs(deltaX) > 1) {
+                    newChip.style.transition = "none";
+                    newChip.style.transform = "translateX(" + deltaX + "px)";
+                    newChip.offsetHeight; // 强制 reflow
+                    newChip.style.transition = "transform 0.12s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+                    newChip.style.transform = "translateX(0px)";
+                    (function (chip) {
+                        chip.addEventListener("transitionend", function cleanup() {
+                            chip.removeEventListener("transitionend", cleanup);
+                            chip.style.transition = "";
+                            chip.style.transform = "";
+                        });
+                    })(newChip);
+                }
+            }
+        } else {
+            // 未移动: 清理拖拽芯片自身 transform
+            d.chip.style.transform = "";
+            d.chip.style.transition = "";
+        }
+
+        // 保留 moved 标记到下一 tick (click 在 mouseup 后同步派发, 需忽略)
+        _drag.chip = null;
+        setTimeout(function () { _drag = null; }, 0);
+    };
+    document.addEventListener("mouseup", _dragUp);
+}
+
+function uninstallRightTabDrag() {
+    if (_dragMove) {
+        document.removeEventListener("mousemove", _dragMove);
+        _dragMove = null;
+    }
+    if (_dragUp) {
+        document.removeEventListener("mouseup", _dragUp);
+        _dragUp = null;
+    }
+    _drag = null;
+}
+
+/** 右栏标签重排: from → to, 激活条目跟随 */
+function moveRightTab(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
+    if (fromIdx < 0 || fromIdx >= _rightTabs.length) return;
+    if (toIdx < 0 || toIdx >= _rightTabs.length) return;
+    var tab = _rightTabs.splice(fromIdx, 1)[0];
+    _rightTabs.splice(toIdx, 0, tab);
+
+    // _rightActive 跟随: 拖的是激活标签 → 移到新位置; 否则区间移动调整
+    if (_rightActive === fromIdx) _rightActive = toIdx;
+    else if (fromIdx < _rightActive && toIdx >= _rightActive) _rightActive--;
+    else if (fromIdx > _rightActive && toIdx <= _rightActive) _rightActive++;
+
+    renderRightTabs();
 }
 
 /* ------------------------------------------------------------------ */
@@ -962,6 +1152,7 @@ function enable() {
     syncEditor();
     syncPanes();
     renderRightTabs();
+    installRightTabDrag();
     window.BetterTypora.scroll.installAutoRestore();
     installPreviewTheme();
     _themeUnsub = window.BetterTypora.theme.onChange(function () {
@@ -983,6 +1174,7 @@ function disable() {
     if (_layoutTimer) { clearInterval(_layoutTimer); _layoutTimer = null; }
     unbindEvents();
     closeCtxMenu();
+    uninstallRightTabDrag();
     if (_editorEl) _editorEl.classList.remove("bt-editor-fixed");
     if (_tabBarEl) _tabBarEl.classList.remove("bt-tabbar-floating");
     // 恢复所有被排除的标签
