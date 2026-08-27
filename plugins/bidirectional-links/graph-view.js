@@ -31,6 +31,7 @@
         this._overlayEl = null;
         this._canvasEl = null;
         this._searchInput = null;
+        this._embedContainer = null;   // 嵌入模式挂载容器 (分屏右栏等), null = 全屏 overlay
 
         // 状态
         this._isOpen = false;
@@ -64,8 +65,11 @@
     // 公共 API
     // ===================================================================
 
-    GraphView.prototype.open = function () {
+    GraphView.prototype.open = function (container) {
         if (this._destroyed || this._isOpen) return;
+
+        // 嵌入模式: 挂载到指定容器 (无遮罩, 面板铺满), 复用 overlay 结构
+        if (container) this._embedContainer = container;
 
         // 延迟加载子模块
         if (!this._layout || !this._renderer) {
@@ -80,8 +84,14 @@
         requestAnimationFrame(function () {
             setTimeout(function () {
                 if (self._destroyed || !self._isOpen) return;
-                self._buildGraph();
-                self._centerAndStart();
+                try {
+                    self._buildGraph();
+                    self._centerAndStart();
+                    // 索引未就绪 → 空图自动等待 (异步分批构建, 对齐 30s 窗口)
+                    self._ensureGraph();
+                } catch (e) {
+                    console.log("[图谱] open 构建异常: " + e.message);
+                }
             }, 0);
         });
 
@@ -113,6 +123,12 @@
     };
 
     GraphView.prototype._animateOut = function () {
+        // 嵌入模式: 无退场动画, 直接移除
+        if (this._embedContainer) {
+            this._removeOverlay();
+            this._isOpen = false;
+            return;
+        }
         var panel = this._overlayEl ? this._overlayEl.querySelector(".graph-view-panel") : null;
         var backdrop = this._overlayEl ? this._overlayEl.querySelector(".graph-view-backdrop") : null;
         var self = this;
@@ -137,6 +153,29 @@
 
     GraphView.prototype.isOpen = function () {
         return this._isOpen;
+    };
+
+    /** 暂停模拟与渲染 (嵌入模式标签切走时调用, 保留数据) */
+    GraphView.prototype.pause = function () {
+        if (!this._isOpen) return;
+        if (this._layout) this._layout.stop();
+        if (this._renderer) this._renderer.stopRenderLoop();
+        this._stopWorker();
+        this._workerStarted = false;
+    };
+
+    /** 恢复模拟与渲染 (嵌入模式标签切回时调用) */
+    GraphView.prototype.resume = function () {
+        if (!this._isOpen || !this._renderer) return;
+        this._startSimulation();
+    };
+
+    /** 高亮中心节点 (实时跟随当前文件) */
+    GraphView.prototype.setCenter = function (filePath) {
+        if (!this._renderer || !filePath) return;
+        var node = this._nodesById[filePath];
+        this._renderer._selId = node ? node.id : null;
+        this._renderer.tick();
     };
 
     GraphView.prototype.destroy = function () {
@@ -318,11 +357,13 @@
 
     GraphView.prototype._createOverlay = function () {
         var doc = document;
+        var embed = !!this._embedContainer;
 
-        // 覆盖层容器
+        // 覆盖层容器 (嵌入模式: 挂到目标容器, CSS 铺满; 全屏: body + 遮罩)
         var overlay = doc.createElement("div");
         overlay.id = "graph-view-overlay";
         overlay.setAttribute("data-plugin-id", "bidirectional-links");
+        if (embed) overlay.className = "graph-view-embed";
 
         // 背景
         var backdrop = doc.createElement("div");
@@ -436,30 +477,32 @@
         }
 
         overlay.appendChild(panel);
-        doc.body.appendChild(overlay);
+        (embed ? this._embedContainer : doc.body).appendChild(overlay);
         this._overlayEl = overlay;
 
-        // --- 绑定事件 ---
+        // --- 绑定事件 (嵌入模式: 关闭由外部管理, 不绑 ESC/背景点击) ---
         var self = this;
 
-        // 关闭按钮
+        // 关闭按钮 (嵌入模式 CSS 隐藏)
         closeBtn.addEventListener("click", function () { self.close(); });
 
-        // 背景点击关闭
-        this._onBackdropClickBound = function (e) {
-            if (e.target === backdrop || e.target === overlay) {
-                self.close();
-            }
-        };
-        overlay.addEventListener("mousedown", this._onBackdropClickBound);
+        if (!embed) {
+            // 背景点击关闭
+            this._onBackdropClickBound = function (e) {
+                if (e.target === backdrop || e.target === overlay) {
+                    self.close();
+                }
+            };
+            overlay.addEventListener("mousedown", this._onBackdropClickBound);
 
-        // ESC 关闭
-        this._onKeyDownBound = function (e) {
-            if (e.key === "Escape") {
-                self.close();
-            }
-        };
-        document.addEventListener("keydown", this._onKeyDownBound);
+            // ESC 关闭
+            this._onKeyDownBound = function (e) {
+                if (e.key === "Escape") {
+                    self.close();
+                }
+            };
+            document.addEventListener("keydown", this._onKeyDownBound);
+        }
 
         // Resize
         this._onResizeBound = function () {
@@ -710,6 +753,42 @@
         }
     };
 
+    /** 重建图数据与渲染器 (索引就绪后刷新空图) */
+    GraphView.prototype.refresh = function () {
+        if (!this._isOpen || this._destroyed) return false;
+        try {
+            // 停止当前模拟/渲染
+            if (this._layout) this._layout.stop();
+            if (this._renderer) this._renderer.stopRenderLoop();
+            this._stopWorker();
+            this._workerStarted = false;
+            this._rendererGPU = null;
+            // 重建图
+            this._buildGraph();
+            if (!this._nodes || !this._nodes.length) return false;   // 索引仍未就绪
+            this._centerAndStart();
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /** open 后空图自动等待索引 (索引构建是异步分批的, 最多 30s) */
+    GraphView.prototype._ensureGraph = function () {
+        var self = this;
+        var tries = 0;
+        (function check() {
+            if (!self._isOpen || self._destroyed) return;
+            if (self._nodes && self._nodes.length > 0) return;   // 图已就绪
+            tries++;
+            if (tries > 60) return;   // 60 × 500ms = 30s (对齐索引初始化窗口)
+            setTimeout(function () {
+                if (self.refresh()) return;
+                check();
+            }, 500);
+        })();
+    };
+
     GraphView.prototype._centerAndStart = function () {
         var canvas = this._canvasEl;
         if (!canvas) return;
@@ -728,7 +807,11 @@
             onNodeDblClick: function (node) {
                 if (self._openFile) {
                     self._openFile(node.id);
-                    self.close();
+                    // 嵌入模式 (分屏图谱标签): 不关闭 — 图谱标签的切换/
+                    // 卸载由 split-view 的 applyRightPane/onFileOpened 管理
+                    // (打开的文件在右栏则标签切换卸载, 在左栏则图谱保留
+                    // 且中心跟随新文件)
+                    if (!self._embedContainer) self.close();
                 }
             },
             onNodeDragStart: function (node) {
@@ -776,8 +859,22 @@
         // 绑定设置面板滑块事件
         this._bindSettings();
 
+        this._startSimulation();
+
+        // 更新统计
+        var statsEl = document.getElementById("graph-stats");
+        if (statsEl) {
+            statsEl.textContent =
+                this._nodes.length + " 节点 · " + this._edges.length + " 条链接";
+        }
+    };
+
+    /** 启动物理模拟 (Worker 优先, 回退主线程) — 初次与 resume 复用 */
+    GraphView.prototype._startSimulation = function () {
+        var renderer = this._renderer;
+        if (!renderer) return;
+
         if (this._initWorker()) {
-            // 路径 1：Worker 物理模拟（持续运行，直到 close）
             // 打包所有节点位置（可能来自缓存或刚生成）
             var workerNodes = [];
             for (var i = 0; i < this._nodes.length; i++) {
@@ -807,13 +904,6 @@
         } else {
             // 路径 3：回退 → 原始主线程模拟
             this._runFallbackSimulation();
-        }
-
-        // 更新统计
-        var statsEl = document.getElementById("graph-stats");
-        if (statsEl) {
-            statsEl.textContent =
-                this._nodes.length + " 节点 · " + this._edges.length + " 条链接";
         }
     };
 

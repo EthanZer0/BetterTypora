@@ -226,13 +226,16 @@ function activeRightTab() {
 function applyRightPane() {
     var tab = activeRightTab();
     if (!tab) {
+        unmountGraphPane();
         syncPanes();
         return;
     }
     if (isGraphTab(tab)) {
-        mountGraphPane();   // 图谱面板 (graph-view 嵌入, 第二阶段)
+        mountGraphPane();
         return;
     }
+    // 文件条目: 图谱面板卸载
+    unmountGraphPane();
     if (_activeSide === "right") {
         if (tab.path !== BetterTypora.getCurrentFile()) BetterTypora.openFile(tab.path);
     } else {
@@ -345,6 +348,8 @@ function renderRightTabs() {
 var CTX_ITEMS = [
     { fn: "send-left", label: "发送到左栏" },
     { sep: true },
+    { fn: "open-graph", label: "在右栏打开知识图谱" },
+    { sep: true },
     { fn: "close", label: "关闭此标签" },
     { sep: true },
     { fn: "others", label: "关闭其他标签" },
@@ -391,6 +396,7 @@ function openCtxMenu(x, y, idx) {
         var el = menu.querySelector('[data-action="' + action + '"]');
         if (el) el.classList.toggle("disabled", disabled);
     };
+    setState("send-left", isGraphTab(_rightTabs[idx]));   // 图谱不可发送
     setState("others", n < 2);
     setState("left", idx <= 0);
     setState("right", idx < 0 || idx >= n - 1);
@@ -457,6 +463,9 @@ function ctxExec(fn) {
             break;
         case "reopen":
             reopenRightClosed();
+            break;
+        case "open-graph":
+            addGraphTab();
             break;
     }
 }
@@ -712,9 +721,59 @@ function sendToLeft(idx) {
 /* 预览渲染                                                             */
 /* ------------------------------------------------------------------ */
 
-/** 右栏图谱面板挂载 (graph-view 嵌入, 第二阶段实现) */
+var _graphView = null;   // bidirectional-links 的 GraphView 实例 (嵌入模式)
+
+/** 右栏图谱面板挂载 (图谱虚拟标签激活时) */
 function mountGraphPane() {
-    // TODO(第二阶段): 在右栏内容区挂载嵌入式知识图谱, 跟随当前文件
+    var container = _els.rightContent;
+    if (!container) return;
+    // 先清空容器, 再挂载 — embed-graph 命令内部会 open(container),
+    // 顺序颠倒会把刚挂载的 overlay 清掉 (detached DOM → 图谱空白)
+    container.innerHTML = "";
+    try {
+        if (!_graphView) {
+            _graphView = window.BetterTypora.commands.execute(
+                "bidirectional-links:embed-graph", container);
+        } else if (typeof _graphView.open === "function") {
+            _graphView.open(container);
+        }
+    } catch (e) {
+        logger.log("图谱挂载失败: " + e.message);
+    }
+}
+
+/** 图谱从右栏内容区卸载 (切到文件标签/关闭图谱标签时) */
+function unmountGraphPane() {
+    if (_graphView && typeof _graphView.close === "function") {
+        logger.log("[图谱] unmount 被调用 (applyRightPane/syncPanes 路径)");
+        try { _graphView.close(); } catch (e) {}
+    }
+}
+
+/** 图谱中心节点跟随当前文件 */
+function syncGraphCenter() {
+    if (!_graphView || typeof _graphView.setCenter !== "function") return;
+    var cur = BetterTypora.getCurrentFile();
+    if (cur) {
+        try { _graphView.setCenter(cur); } catch (e) {}
+    }
+}
+
+/** 在右栏打开知识图谱 (图谱虚拟标签) */
+function addGraphTab() {
+    // 检查 bidirectional-links 是否提供 embed-graph 命令
+    try {
+        var has = window.BetterTypora.commands.has &&
+            window.BetterTypora.commands.has("bidirectional-links:embed-graph");
+        if (!has) {
+            window.BetterTypora.toast("知识图谱不可用 — 请启用双向链接插件", 2500);
+            return;
+        }
+    } catch (e) {}
+    _rightTabs.push({ type: "graph", name: "🕸 知识图谱" });
+    _rightActive = _rightTabs.length - 1;
+    renderRightTabs();
+    applyRightPane();
 }
 
 function renderPreviewInto(container, filePath) {
@@ -733,6 +792,7 @@ function renderPreviewInto(container, filePath) {
 function syncPanes() {
     if (_activeSide === "left") {
         // 左栏被编辑器贴片覆盖; 右栏渲染预览
+        unmountGraphPane();   // 右栏内容区将重建, 图谱先卸载 (防 DOM 清空状态残留)
         _els.leftContent.innerHTML = "";
         var fp = _rightActive >= 0 ? _rightTabs[_rightActive].path : null;
         renderPreviewInto(_els.rightContent, fp);
@@ -788,6 +848,7 @@ function afterActivate() {
         var cur = BetterTypora.getCurrentFile();
         if (cur) tabsCmd("visual-activate", cur);
     } catch (e) {}
+    syncGraphCenter();
     setTimeout(function () {
         if (!_active) return;
         try {
@@ -903,6 +964,11 @@ function disable() {
     _closedStack = [];
     _leftPreviewPath = null;
     window.BetterTypora.scroll.clear();   // 清空记录, 避免分屏关闭后注入旧值
+    // 图谱面板彻底销毁
+    if (_graphView && typeof _graphView.destroy === "function") {
+        try { _graphView.destroy(); } catch (e) {}
+    }
+    _graphView = null;
     removePreviewTheme();
     if (_themeUnsub) { _themeUnsub(); _themeUnsub = null; }
     logger.log("分屏已关闭");
@@ -990,6 +1056,10 @@ function onWindowResize() {
 
 function onClickContainer(e) {
     if (!_active) return;
+    // 图谱面板 (嵌入 overlay) 内的点击不参与预览交互 — overlay 挂在
+    // .bt-split-preview 容器内, closest 会误命中导致 setActiveSide 迁移
+    // 卸载图谱
+    if (e.target.closest && e.target.closest("#graph-view-overlay")) return;
     // 拦截所有链接: 本地 (data-bt-link) → 左栏打开;
     // 外链 (http/mailto/ftp) → 系统浏览器 (preventDefault 阻止应用内
     // 导航 — 否则 Electron 窗口直接导航到外部站点会闪退)

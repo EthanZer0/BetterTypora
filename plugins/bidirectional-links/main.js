@@ -793,6 +793,17 @@ module.exports = {
         }, "打开知识图谱");
         api.registerHotkey("bidirectional-links:graph-view", "Ctrl+Shift+G", "editorFocus");
 
+        // 6a. 嵌入模式 (分屏图谱标签): 挂载 GraphView 到指定容器
+        api.registerCommand("embed-graph", function (container) {
+            if (!graphView) {
+                graphView = new GraphView(linkIndex, resolver, function (filePath) {
+                    BetterTypora.openFile(filePath);
+                }, PLUGIN_DIR);
+            }
+            if (container) graphView.open(container);
+            return graphView;
+        }, "挂载知识图谱到容器 (split-view 图谱标签)");
+
         // 6b. 预加载 WebGPU device — 消除图谱打开后空白延迟
         //     requestAdapter + requestDevice 是唯一的异步操作（100–500ms），
         //     在插件加载时后台完成，用户打开图谱时 device 已就绪。

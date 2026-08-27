@@ -575,6 +575,9 @@
 
         var ctx = this._ctx, dpr = this._dpr, p = this._palette;
         var cw = this._canvas.clientWidth, ch = this._canvas.clientHeight;
+        // 尺寸未就绪 (布局未完成, 如嵌入容器首帧) → 跳过本帧, 渲染循环
+        // 下一帧重试 — 0 尺寸会让 canvas.width=0 且 drawImage(0尺寸) 抛错
+        if (!cw || !ch) return;
         var pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
 
         if (this._pxW !== pw || this._pxH !== ph) {

@@ -488,6 +488,36 @@
     z-index: 0;
     pointer-events: none;
 }
+
+/* ===================================================================
+ * 嵌入模式 (分屏图谱标签): overlay 铺满宿主容器, 无遮罩/无动画,
+ * 关闭按钮隐藏 (关闭由分屏标签管理)
+ * =================================================================== */
+#graph-view-overlay.graph-view-embed {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    align-items: stretch;
+}
+#graph-view-overlay.graph-view-embed .graph-view-backdrop {
+    display: none;
+}
+#graph-view-overlay.graph-view-embed .graph-view-panel {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+}
+#graph-view-overlay.graph-view-embed .graph-view-close-btn {
+    display: none;
+}
+/* 嵌入模式只显示图谱本体 — 隐藏标题/搜索/设置/提示等外框元素 */
+#graph-view-overlay.graph-view-embed .graph-view-header,
+#graph-view-overlay.graph-view-embed .graph-view-footer {
+    display: none;
+}
 #graph-canvas-labels {
     z-index: 1;
     cursor: grab;
