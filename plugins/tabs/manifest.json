@@ -17,6 +17,16 @@
     "maxTabs": 20,
     "showCloseButton": true,
     "confirmBeforeClose": true,
-    "restoreOnStartup": true
-  }
+    "restoreOnStartup": true,
+    "autoHideTabbar": false
+  },
+  "settingsSchema": [
+    {
+      "key": "autoHideTabbar",
+      "label": "自动隐藏标签栏",
+      "type": "boolean",
+      "default": false,
+      "desc": "鼠标离开标签栏后自动收起隐藏, 移回顶部区域重新展开"
+    }
+  ]
 }

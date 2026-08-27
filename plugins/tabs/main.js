@@ -32,6 +32,127 @@ function isExcluded(filePath) {
 }
 
 // ===================================================================
+// 自动隐藏 — 鼠标离开标签条自动收起 (偏好设置 → 标签页 → 设置)
+// 多目标: 左栏标签栏 (#typora-tab-bar) + 分屏右栏标签条
+// (#bt-split-right-tabs), 各自独立展开/收起。
+// 收起 = 高度归零完全隐藏 (CSS 过渡); 展开由触发热区承担 (每个
+// 目标一个 fixed 元素覆盖其顶部 24px, 仅收起状态可 hover)。
+// 250ms tick: 同步热区位置/可 hover 状态 + 检测动态出现的目标
+// (分屏开合、标签栏重建)。分屏时 split-view 每 150ms 实测
+// offsetHeight 同步 --bt-tabbar-h, 左栏内容/编辑器自动让位
+// ===================================================================
+var _autoHideOn = false;
+var _autoHideTimer = null;
+var _autoHideTickTimer = null;
+var _autoHideTargets = [];      // [{bar, hotzone}]
+var _autoHideBarSelectors = ["#typora-tab-bar", "#bt-split-right-tabs"];
+
+function _autoHideAttach(bar) {
+    if (!bar || bar.__btAutoHideBound) return;
+    bar.__btAutoHideBound = true;
+    var hz = document.createElement("div");
+    hz.className = "bt-auto-hide-hotzone";
+    hz.style.pointerEvents = "none";
+    hz.addEventListener("mouseenter", function () { _autoHideExpand(bar); });
+    document.body.appendChild(hz);
+    _autoHideTargets.push({ bar: bar, hotzone: hz });
+    bar.addEventListener("mouseenter", function () { _autoHideExpand(bar); });
+    bar.addEventListener("mouseleave", function () { _autoHideCollapseSoon(bar); });
+    _autoHideSyncTarget({ bar: bar, hotzone: hz });
+}
+
+function _autoHideExpand(bar) {
+    _autoHideCancel();
+    bar.classList.remove("bt-auto-hide-collapsed");
+}
+
+function _autoHideCollapseSoon(bar) {
+    _autoHideCancel();
+    if (!_autoHideOn) return;
+    // 延迟收起: 鼠标只是划过时立即恢复展开 (mouseenter 取消)
+    _autoHideTimer = _timers.setTimeout(function () {
+        if (!_autoHideOn) return;
+        bar.classList.add("bt-auto-hide-collapsed");
+    }, 250);
+}
+
+/** 同步单个目标的热区位置 + 收起状态下的可 hover 开关 */
+function _autoHideSyncTarget(t) {
+    if (t.bar.style.display === "none") {
+        t.hotzone.style.display = "none";
+        return;
+    }
+    var r = t.bar.getBoundingClientRect();
+    if (r.width < 2) { t.hotzone.style.display = "none"; return; }
+    t.hotzone.style.display = "block";
+    t.hotzone.style.left = r.left + "px";
+    t.hotzone.style.top = r.top + "px";
+    t.hotzone.style.width = r.width + "px";
+    t.hotzone.style.height = "24px";
+    // 展开时禁用指针 (不拦截标签条交互), 收起时恢复可 hover
+    t.hotzone.style.pointerEvents =
+        t.bar.classList.contains("bt-auto-hide-collapsed") ? "auto" : "none";
+}
+
+/** 周期 tick: 清理已销毁目标 + 同步位置 + 检测动态出现的目标 */
+function _autoHideTick() {
+    var alive = [];
+    for (var i = 0; i < _autoHideTargets.length; i++) {
+        var t = _autoHideTargets[i];
+        if (!document.contains(t.bar)) {
+            if (t.hotzone.parentNode) t.hotzone.parentNode.removeChild(t.hotzone);
+            continue;
+        }
+        _autoHideSyncTarget(t);
+        alive.push(t);
+    }
+    _autoHideTargets = alive;
+    for (var j = 0; j < _autoHideBarSelectors.length; j++) {
+        var bar = document.querySelector(_autoHideBarSelectors[j]);
+        if (bar) _autoHideAttach(bar);
+    }
+}
+
+function _autoHideCancel() {
+    if (_autoHideTimer) {
+        _timers.clearTimeout(_autoHideTimer);
+        _autoHideTimer = null;
+    }
+}
+
+function _autoHideTeardown() {
+    if (_autoHideTickTimer) {
+        _timers.clearInterval(_autoHideTickTimer);
+        _autoHideTickTimer = null;
+    }
+    for (var i = 0; i < _autoHideTargets.length; i++) {
+        if (_autoHideTargets[i].hotzone.parentNode) {
+            _autoHideTargets[i].hotzone.parentNode.removeChild(_autoHideTargets[i].hotzone);
+        }
+    }
+    _autoHideTargets = [];
+}
+
+/** 开关自动隐藏 (enable 时 + 设置变更时调用) */
+function setAutoHide(on) {
+    _autoHideOn = !!on;
+    if (!on) {
+        _autoHideCancel();
+        _autoHideTeardown();
+        for (var i = 0; i < _autoHideBarSelectors.length; i++) {
+            var bar = document.querySelector(_autoHideBarSelectors[i]);
+            if (bar) bar.classList.remove("bt-auto-hide-collapsed");
+        }
+    } else {
+        if (!_autoHideTickTimer) {
+            _autoHideTickTimer = _timers.setInterval(_autoHideTick, 250);
+        }
+        _autoHideTick();
+        // 初始全部展开 — 等用户第一次移出再收起, 避免开启后"消失"的困惑
+    }
+}
+
+// ===================================================================
 // TabDataStore — 纯数据层
 // ===================================================================
 var tabStore = {
@@ -404,6 +525,7 @@ var tabBarUI = {
         }
 
         this.barEl = bar;
+        _autoHideAttach(bar);
         this.render();
         logger.log("标签栏已注入");
         return true;
@@ -1544,6 +1666,12 @@ module.exports = {
         tabBarUI.inject();
         tabBarUI.startGuard();
 
+        // 2b. 自动隐藏 (偏好设置 → 标签页 → 设置, 实时生效)
+        setAutoHide(api.getSetting("autoHideTabbar", false));
+        api.onSettingChange(function (key, value) {
+            if (key === "autoHideTabbar") setAutoHide(value);
+        });
+
         // 3. 安装文件打开拦截器 (必须在 auto-detect 之前, 以便后续文件打开都能被拦截)
         interceptor.install();
 
@@ -1701,6 +1829,13 @@ module.exports = {
 
         // 停止守护循环
         tabBarUI.stopGuard();
+
+        // 停止自动隐藏 (取消延迟收起, 销毁热区, 恢复标签栏展开)
+        _autoHideOn = false;
+        _autoHideCancel();
+        _autoHideTeardown();
+        var autoBar = document.getElementById("typora-tab-bar");
+        if (autoBar) autoBar.classList.remove("bt-auto-hide-collapsed");
 
         // 关闭定时器组 (自动清理所有定时器)
         if (_timers) {

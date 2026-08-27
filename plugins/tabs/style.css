@@ -240,3 +240,56 @@ body.unibody-window .typora-tab-chip.active {
     margin: 4px 8px;
     background: var(--window-border, rgba(128,128,128,0.18));
 }
+
+/* ===================================================================
+ * 自动隐藏 — 鼠标离开标签栏自动收起 (偏好设置 → 标签页 → 设置)
+ * 收起后完全隐藏 (height 0), 展开由独立的触发热区承担 (见
+ * #bt-auto-hide-hotzone, 覆盖标签栏顶部 24px, 仅收起时可 hover)。
+ * 非分屏标签栏在 content 顶部正常流, 高度收缩后内容自动让位;
+ * 分屏浮动时 split-view 每 150ms 实测 offsetHeight 同步
+ * --bt-tabbar-h, 左栏内容/编辑器贴片随高度动画平滑让位
+ * =================================================================== */
+#typora-tab-bar {
+    transition: height 0.22s ease, opacity 0.22s ease;
+}
+
+#typora-tab-bar.bt-auto-hide-collapsed {
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 分屏浮动标签栏: split-view 的 transition:none !important 会禁掉
+   自动隐藏动画 — 用更高特异性 + !important 仅恢复 height/opacity
+   过渡 (left/width 仍无过渡, 与现状一致) */
+#typora-tab-bar.bt-tabbar-floating {
+    transition: height 0.22s ease, opacity 0.22s ease !important;
+}
+
+/* 分屏右栏标签条: 自动隐藏收起 (flex column 容器, 高度归零后右栏
+   内容自动上移让位; 容器在 body 下, 不受 .bt-editor-fixed 禁动画影响)。
+   注意: 收起只改 height, 不动 flex-basis — basis 置 0 会让 flex 布局
+   立即重排, 绕过 height 过渡 (收起瞬跳无动画) */
+#bt-split-right-tabs {
+    transition: height 0.22s ease, opacity 0.22s ease;
+}
+#bt-split-right-tabs.bt-auto-hide-collapsed {
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 自动隐藏触发热区 — 每个标签条目标一个, 覆盖其顶部 24px,
+   鼠标移入展开对应标签条。展开时 pointer-events:none (tick 同步),
+   不拦截标签栏交互; z-index 100 高于分屏容器 (50)/浮动标签栏 (65),
+   收起后仍可 hover */
+.bt-auto-hide-hotzone {
+    position: fixed;
+    z-index: 100;
+    pointer-events: none;
+    background: transparent;
+}
