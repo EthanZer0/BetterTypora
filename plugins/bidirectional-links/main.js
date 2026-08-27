@@ -571,6 +571,7 @@ function buildIndex(onComplete) {
         linkIndex.fileMTimes.clear();
         linkIndex.allMdFiles = [];
         linkIndex.vaultRoot = null;
+        linkIndex.ready = false;   // 索引重建中, 图谱等就绪再刷新
         // 重启 FileWatcher（旧 vault 的轮询不再有用）
         if (fileWatcher) fileWatcher.stop();
     }
@@ -589,6 +590,15 @@ function buildIndex(onComplete) {
 
             // 持久化
             linkIndex.persist();
+
+            // 索引就绪 → 图谱 (若打开) 即刻重建 — 不等图谱的 500ms 轮询
+            // (vault 切换时旧索引残留在扫描期, 完成后立即刷新新图谱)
+            try {
+                if (graphView && typeof graphView.refresh === "function" &&
+                    graphView.isOpen && graphView.isOpen()) {
+                    graphView.refresh();
+                }
+            } catch (e) {}
 
             // 更新当前文件的面板
             var currentFile = getCurrentFilePath();

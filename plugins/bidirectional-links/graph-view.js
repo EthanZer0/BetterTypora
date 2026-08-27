@@ -41,6 +41,7 @@
         this._maxDegree = 0;
         this._hasCachedLayout = false;
         this._destroyed = false;
+        this._lastVault = null;   // vault 检测 (切换目录 → 图需要重建)
 
         // Worker 物理模拟
         this._worker = null;
@@ -87,8 +88,7 @@
                 try {
                     self._buildGraph();
                     self._centerAndStart();
-                    // 索引未就绪 → 空图自动等待 (异步分批构建, 对齐 30s 窗口)
-                    self._ensureGraph();
+                    // 索引未就绪的空图由 buildIndex 完成事件驱动重建
                 } catch (e) {
                     console.log("[图谱] open 构建异常: " + e.message);
                 }
@@ -173,12 +173,27 @@
     /** 高亮中心节点 (实时跟随当前文件) */
     GraphView.prototype.setCenter = function (filePath) {
         if (!filePath || !this._isOpen) return;
-        // 渲染器/图未就绪时挂起, 构建完成后自动应用
         this._pendingCenter = filePath;
+        // vault 变化 (切到其他反链目录): 节点/边需要重建 — setCenter 只
+        // 高亮, 旧图的节点集不含新目录文件; 索引就绪立即 refresh, 未
+        // 就绪等 buildIndex 完成事件 (扫描完成 → graphView.refresh)
+        var vault = this._getVaultRoot();
+        if (this._lastVault !== vault) {
+            this._lastVault = vault;
+            if (this._indexReady(vault)) this.refresh();
+            return;
+        }
         if (!this._renderer || !this._nodesById) return;
         var node = this._nodesById[filePath];
         this._renderer._selId = node ? node.id : null;
         this._renderer.tick();
+    };
+
+    /** 索引就绪: vault 匹配目标且扫描/加载完成 (扫描中旧索引残留) */
+    GraphView.prototype._indexReady = function (vault) {
+        var index = this._index;
+        return !!(index && index.vaultRoot === vault && index.ready &&
+            index.allMdFiles && index.allMdFiles.length > 0);
     };
 
     /** 构建完成后应用挂起的中心节点 */
@@ -753,6 +768,7 @@
 
         // 尝试从缓存加载位置
         var vaultRoot = this._getVaultRoot();
+        this._lastVault = vaultRoot;
         var cached = this._loadGraphCache();
         this._hasCachedLayout = false;
         if (cached && this._layout.isCacheValid(cached, this._nodes, this._edges, vaultRoot)) {
@@ -779,22 +795,6 @@
         } catch (e) {
             return false;
         }
-    };
-
-    /** open 后空图自动等待索引 (索引构建是异步分批的, 最多 30s) */
-    GraphView.prototype._ensureGraph = function () {
-        var self = this;
-        var tries = 0;
-        (function check() {
-            if (!self._isOpen || self._destroyed) return;
-            if (self._nodes && self._nodes.length > 0) return;   // 图已就绪
-            tries++;
-            if (tries > 60) return;   // 60 × 500ms = 30s (对齐索引初始化窗口)
-            setTimeout(function () {
-                if (self.refresh()) return;
-                check();
-            }, 500);
-        })();
     };
 
     GraphView.prototype._centerAndStart = function () {

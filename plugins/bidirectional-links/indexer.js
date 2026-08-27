@@ -29,6 +29,7 @@
         this.fileMTimes   = new Map();
         this.allMdFiles   = [];
         this.vaultRoot    = null;
+        this.ready        = false; // 索引扫描/加载完成标志 (图谱 vault 切换判断)
     }
 
     LinkIndex.prototype.setMaxSizeKb = function (kb) { this._maxSizeKb = kb; };
@@ -156,6 +157,7 @@
 
         this.vaultRoot = vaultRoot;
         this.allMdFiles = mdFiles.slice();
+        this.ready = false;   // 扫描完成前不算就绪 (旧索引可能残留)
 
         var total = mdFiles.length;
         var done = 0;
@@ -214,6 +216,7 @@
                     if (!newSet[f]) self.removeFile(f);
                 });
 
+                self.ready = true;   // 扫描完成 → 索引就绪
                 if (onDone) onDone(true);
                 return;
             }
@@ -472,6 +475,7 @@
 
             this.vaultRoot = data.vaultRoot || null;
             this.allMdFiles = data.allMdFiles || [];
+            this.ready = true;   // 缓存加载完成 → 索引就绪
 
             // 校验缓存有效性：抽样检查（大 vault 时避免全量 existsSync）
             if (this.allMdFiles.length > 0) {
