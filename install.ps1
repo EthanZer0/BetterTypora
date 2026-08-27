@@ -17,7 +17,8 @@
 param(
     [string]$TyporaDir = "",
     [switch]$Uninstall,
-    [switch]$NoBackup
+    [switch]$NoBackup,
+    [switch]$DetectOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,7 +47,24 @@ function Find-TyporaResources {
             if (Test-Path $res) { return $res }
         }
     } catch {}
-    # 2. 注册表卸载信息 (安装器写入的权威路径, 覆盖标准安装位置)
+    # 2. 注册表 App Paths (应用路径注册, 默认值 = exe 完整路径; 便携版也常注册)
+    $appPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Typora.exe",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Typora.exe",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Typora.exe"
+    )
+    foreach ($k in $appPaths) {
+        try {
+            if (-not (Test-Path $k)) { continue }
+            $prop = Get-ItemProperty $k -ErrorAction SilentlyContinue
+            $exePath = $prop.'(default)'
+            if ($exePath -and (Test-Path $exePath)) {
+                $res = Join-Path (Split-Path -Parent $exePath) "resources"
+                if (Test-Path $res) { return $res }
+            }
+        } catch {}
+    }
+    # 3. 注册表卸载信息 (安装器写入的权威路径, 覆盖标准安装位置)
     $uninstallKeys = @(
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Typora",
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Typora",
@@ -72,6 +90,17 @@ function Find-TyporaResources {
                 }
             }
         } catch {}
+    }
+    # 4. 常见安装路径兜底 (便携版未注册注册表时)
+    $candidates = @(
+        "$env:ProgramFiles\Typora\resources",
+        "${env:ProgramFiles(x86)}\Typora\resources",
+        "$env:LOCALAPPDATA\Programs\Typora\resources",
+        "$env:LOCALAPPDATA\Typora\resources",
+        "$env:USERPROFILE\scoop\apps\typora\current\resources"
+    )
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return $c }
     }
     return $null
 }
@@ -110,6 +139,11 @@ if (-not $resources) {
     exit 1
 }
 Write-Ok "Typora resources: $resources"
+
+if ($DetectOnly) {
+    Write-Ok "检测模式: 仅定位, 不执行安装"
+    exit 0
+}
 
 $windowHtml = Join-Path $resources "window.html"
 if (-not (Test-Path $windowHtml)) {
