@@ -421,6 +421,7 @@
         this.commands = commands;
         this.settings = settings;
         this.hotkeys = hotkeys;
+        this._settingListeners = [];
     }
 
     PluginAPI.prototype.getSetting = function (key, defaultValue) {
@@ -433,6 +434,11 @@
 
     PluginAPI.prototype.getAllSettings = function () {
         return this.settings.getAll(this.id);
+    };
+
+    /** 订阅设置变更 (偏好设置面板修改时触发, 参数: key, value) */
+    PluginAPI.prototype.onSettingChange = function (callback) {
+        if (typeof callback === "function") this._settingListeners.push(callback);
     };
 
     PluginAPI.prototype.registerCommand = function (localId, execute, description) {
@@ -870,8 +876,26 @@
                 version: p.manifest.version || "0.0.0",
                 state: p.state,
                 description: p.manifest.description || "",
+                // 偏好设置面板: 设置项描述 (manifest.settingsSchema) + 当前值
+                settingsSchema: p.manifest.settingsSchema || [],
+                settings: self._settings.getAll(id) || {},
             };
         });
+    };
+
+    /** 偏好设置面板修改设置: 持久化 + 通知插件 (onSettingChange) */
+    PluginManager.prototype.updateSetting = function (pluginId, key, value) {
+        this._settings.set(pluginId, key, value);
+        var api = this._apis[pluginId];
+        if (api && api._settingListeners && api._settingListeners.length) {
+            for (var i = 0; i < api._settingListeners.length; i++) {
+                try {
+                    api._settingListeners[i](key, value);
+                } catch (e) {
+                    systemLogger.error("设置变更回调异常 '" + pluginId + "':", e.message);
+                }
+            }
+        }
     };
 
     // ===================================================================
@@ -1049,6 +1073,7 @@
         "(function(){",
         "  if (window.__btPrefInjected) return;",   // 幂等: 重复注入不再叠加监听/委托/定时器
         "  window.__btPrefInjected = true;",
+        "  var _openSettings = {};   // 已展开设置面板的插件 id",
         "  var NAV_ID = 'bt-pref-nav-plugins';",
         "  var PANEL_ID = 'bt-pref-panel-plugins';",
         "  function sendToHost(ch, data){ try { require('electron').ipcRenderer.sendToHost(ch, data); } catch (e) {} }",
@@ -1086,6 +1111,15 @@
         "        '.bt-reload-btn { border: none; background: transparent; color: var(--text-color, #333); opacity: 0.6; font-size: 12px; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: background 0.15s ease, opacity 0.15s ease; }' +",
         "        '.bt-reload-btn:hover { background: rgba(128,128,128,0.12); opacity: 1; }' +",
         "        '.bt-reload-btn:disabled { opacity: 0.35; cursor: default; }' +",
+        "        '.bt-settings-btn { border: none; background: transparent; color: var(--text-color, #333); opacity: 0.55; padding: 3px; border-radius: 5px; cursor: pointer; transition: background 0.15s ease, opacity 0.15s ease; display: inline-flex; align-items: center; justify-content: center; }' +",
+        "        '.bt-settings-btn:hover, .bt-settings-btn.open { background: rgba(128,128,128,0.12); opacity: 1; }' +",
+        "        '.bt-plugin-settings { margin: 0 12px 8px 56px; padding: 8px 12px; background: rgba(128,128,128,0.06); border-radius: 6px; }' +",
+        "        '.bt-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; }' +",
+        "        '.bt-setting-label { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +",
+        "        '.bt-setting-desc { font-size: 11px; opacity: 0.5; margin: 0 0 6px; }' +",
+        "        '.bt-setting-input { background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.2); color: var(--text-color, #333); border-radius: 4px; padding: 2px 6px; font-size: 12px; width: 120px; }' +",
+        "        '.bt-setting-input:focus { outline: none; border-color: var(--active-file-text-color, #4a90d9); }' +",
+        "        '.bt-setting-empty { font-size: 12px; opacity: 0.5; padding: 4px 0; }' +",
         "      '</style>' +",
         "      '<h3 class=\\'panel-header\\'>插件</h3>' +",
         "      '<div class=\\'bt-plugin-list\\' id=\\'bt-pref-plugins-list\\'></div>' +",
@@ -1117,19 +1151,53 @@
         "    }",
         "    return true;",
         "  }",
+        "  var GEAR_SVG = '<svg viewBox=\\\"0 0 24 24\\\" width=\\\"14\\\" height=\\\"14\\\" fill=\\\"currentColor\\\" style=\\\"display:block\\\"><path d=\\\"M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.61 3.61 0 0 1 8.4 12c0-1.98 1.62-3.6 3.6-3.6s3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z\\\"/></svg>';",
+        "  function settingsFormHTML(p){",
+        "    var schema = p.settingsSchema || [];",
+        "    var vals = p.settings || {};",
+        "    var h = '';",
+        "    for (var i = 0; i < schema.length; i++) {",
+        "      var s = schema[i];",
+        "      if (!s || !s.key) continue;",
+        "      var val = vals.hasOwnProperty(s.key) ? vals[s.key] : s.default;",
+        "      h += '<div class=\\'bt-setting-row\\'><span class=\\'bt-setting-label\\'>' + (s.label || s.key) + '</span>';",
+        "      if (s.type === 'boolean') {",
+        "        h += '<label class=\\'bt-switch bt-setting-switch\\'><input type=\\'checkbox\\' data-action=\\'setting\\' data-key=\\'' + s.key + '\\'' + (val ? ' checked' : '') + '><span class=\\'bt-switch-track\\'></span></label>';",
+        "      } else if (s.type === 'number') {",
+        "        h += '<input class=\\'bt-setting-input\\' data-action=\\'setting\\' data-key=\\'' + s.key + '\\' data-type=\\'number\\' type=\\'number\\' value=\\'' + (val === undefined || val === null ? '' : val) + '\\'>';",
+        "      } else if (s.type === 'select') {",
+        "        h += '<select class=\\'bt-setting-input\\' data-action=\\'setting\\' data-key=\\'' + s.key + '\\'>';",
+        "        var opts = s.options || [];",
+        "        for (var oi = 0; oi < opts.length; oi++) {",
+        "          h += '<option value=\\'' + opts[oi] + '\\'' + (String(val) === String(opts[oi]) ? ' selected' : '') + '>' + opts[oi] + '</option>';",
+        "        }",
+        "        h += '</select>';",
+        "      } else {",
+        "        h += '<input class=\\'bt-setting-input\\' data-action=\\'setting\\' data-key=\\'' + s.key + '\\' type=\\'text\\' value=\\'' + String(val === undefined || val === null ? '' : val).replace(/\"/g, '&quot;') + '\\'>';",
+        "      }",
+        "      h += '</div>';",
+        "      if (s.desc) h += '<div class=\\'bt-setting-desc\\'>' + s.desc + '</div>';",
+        "    }",
+        "    if (!h) h = '<div class=\\'bt-setting-empty\\'>该插件暂无设置项</div>';",
+        "    return h;",
+        "  }",
         "  function buildRowHTML(p){",
         "    var checked = p.state === 'enabled' ? 'checked' : '';",
         "    var errMark = p.state === 'error' ? ' <span class=\\'bt-plugin-err\\' style=\\'color:rgba(229,57,53,0.9);font-size:11px\\'>错误</span>' : '';",
-        "    return '<div class=\\'bt-plugin-row\\' data-id=\\'' + p.id + '\\'>' +",
+        "    var open = _openSettings[p.id] ? ' open' : '';",
+        "    var panel = _openSettings[p.id] ? '<div class=\\'bt-plugin-settings\\' data-id=\\'' + p.id + '\\'>' + settingsFormHTML(p) + '</div>' : '';",
+        "    return '<div class=\\'bt-plugin-row' + open + '\\' data-id=\\'' + p.id + '\\'>' +",
         "        '<label class=\\'bt-switch\\'><input type=\\'checkbox\\' data-id=\\'' + p.id + '\\' data-action=\\'toggle\\' ' + checked + '><span class=\\'bt-switch-track\\'></span></label>' +",
         "        '<span class=\\'bt-plugin-name\\'>' + (p.name || p.id) + '</span>' +",
         "        '<span class=\\'bt-plugin-version\\'>v' + (p.version || '') + '</span>' + errMark +",
         "        '<span class=\\'bt-plugin-desc\\'>' + (p.description || '') + '</span>' +",
+        "        '<button class=\\'bt-settings-btn' + open + '\\' data-id=\\'' + p.id + '\\' title=\\'设置\\'>' + GEAR_SVG + '</button>' +",
         "        '<button class=\\'bt-reload-btn\\' data-id=\\'' + p.id + '\\'>重载</button>' +",
-        "      '</div>';",
+        "      '</div>' + panel;",
         "  }",
         "  function render(data){",
         "    if (!ensureUI()) return;",
+        "    window.__btPref.lastData = data;   // 齿轮展开设置面板时取 schema/当前值",
         "    var list = document.getElementById('bt-pref-plugins-list');",
         "    if (!list) return;",
         "    var plugins = (data && data.plugins) || [];",
@@ -1140,10 +1208,44 @@
         "  }",
         "  document.addEventListener('click', function(e){",
         "    if (!e.isTrusted) return;  // 忽略程序化事件 (render 更新/脚本触发), 免疫反馈循环",
+        "    // 设置按钮: 展开/收起该插件的设置面板",
+        "    var sbtn = e.target && e.target.closest ? e.target.closest('.bt-settings-btn') : null;",
+        "    if (sbtn) {",
+        "      var sid = sbtn.getAttribute('data-id');",
+        "      var row = sbtn.closest('.bt-plugin-row');",
+        "      if (_openSettings[sid]) {",
+        "        delete _openSettings[sid];",
+        "        sbtn.classList.remove('open');",
+        "        var sp = row.nextSibling;",
+        "        while (sp && !(sp.classList && sp.classList.contains('bt-plugin-settings'))) sp = sp.nextSibling;",
+        "        if (sp) sp.parentNode.removeChild(sp);",
+        "      } else {",
+        "        _openSettings[sid] = true;",
+        "        sbtn.classList.add('open');",
+        "        var data = (window.__btPref && window.__btPref.lastData) || { plugins: [] };",
+        "        var p = null;",
+        "        for (var di = 0; di < data.plugins.length; di++) {",
+        "          if (data.plugins[di].id === sid) { p = data.plugins[di]; break; }",
+        "        }",
+        "        var panel = document.createElement('div');",
+        "        panel.className = 'bt-plugin-settings';",
+        "        panel.setAttribute('data-id', sid);",
+        "        panel.innerHTML = p ? settingsFormHTML(p) : '<div class=\\'bt-setting-empty\\'>该插件暂无设置项</div>';",
+        "        row.parentNode.insertBefore(panel, row.nextSibling);",
+        "      }",
+        "      return;",
+        "    }",
         "    // 开关: 用 click 而非 change — 程序化 checked 赋值不会触发真实 click",
         "    var sw = e.target && e.target.closest ? e.target.closest('.bt-switch') : null;",
         "    if (sw) {",
         "      var input = sw.querySelector('input');",
+        "      // 设置面板开关 (data-action=setting) → 设置变更",
+        "      if (input && input.getAttribute('data-action') === 'setting') {",
+        "        var srow = sw.closest('[data-id]');",
+        "        var sid2 = srow ? srow.getAttribute('data-id') : null;",
+        "        if (sid2) sendToHost('bettertypora:plugins-action', { action: 'setting', id: sid2, key: input.getAttribute('data-key'), value: input.checked });",
+        "        return;",
+        "      }",
         "      var id = input ? input.getAttribute('data-id') : null;",
         "      if (id) {",
         "        input.disabled = true;",
@@ -1158,7 +1260,19 @@
         "      sendToHost('bettertypora:plugins-action', { action: 'reload', id: btn.getAttribute('data-id') });",
         "    }",
         "  });",
-        "  window.__btPref = { render: render, ensureUI: ensureUI };",
+        "  // 设置面板数字/文本/下拉: 失焦或选择时提交",
+        "  document.addEventListener('change', function(e){",
+        "    if (!e.isTrusted) return;",
+        "    var inp = e.target && e.target.closest ? e.target.closest('.bt-setting-input') : null;",
+        "    if (!inp) return;",
+        "    var holder = inp.closest('[data-id]');",
+        "    var sid3 = holder ? holder.getAttribute('data-id') : null;",
+        "    if (!sid3) return;",
+        "    var val = inp.value;",
+        "    if (inp.getAttribute('data-type') === 'number') val = parseFloat(val) || 0;",
+        "    sendToHost('bettertypora:plugins-action', { action: 'setting', id: sid3, key: inp.getAttribute('data-key'), value: val });",
+        "  });",
+        "  window.__btPref = { render: render, ensureUI: ensureUI, lastData: null };",
         "  // 监听主文档推送 (注入时 require 已就绪, 直接同步注册)",
         "  try {",
         "    if (window.require && window.require('electron') && window.require('electron').ipcRenderer) {",
@@ -1213,6 +1327,9 @@
             }
         } else if (msg.action === "reload") {
             mgr.reload(msg.id);
+        } else if (msg.action === "setting") {
+            // 设置面板修改: 持久化 + 通知插件实时应用
+            if (msg.key !== undefined) mgr.updateSetting(msg.id, msg.key, msg.value);
         }
         // 操作后推送更新
         if (_prefWebview && _prefWebview.send) {

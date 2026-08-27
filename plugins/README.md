@@ -198,6 +198,8 @@ BetterTypora.settings.getAll("plugin-id")
 BetterTypora.settings.set("plugin-id", "key", value)
 ```
 
+设置持久化到 `.cache/<plugin-id>.settings.json`（首次加载用 `manifest.settings` 填充默认值，已持久化的值优先）。除了代码内读写，设置也可以在 **偏好设置 → 插件** 页面的齿轮设置面板中图形化修改（由 `manifest.settingsSchema` 驱动，见下文）；面板中的改动由 `PluginManager.updateSetting` 持久化并**实时通知插件**（触发 `api.onSettingChange`），无需重启或重载。
+
 ### 文件事件（FileEventHub）
 
 统一捕获 Typora 的文件操作，覆盖**所有**打开/切换路径（侧边栏、快速打开、菜单、关联文件、拖拽、新建），基于 Typora 原生接口实现：
@@ -256,6 +258,7 @@ api.manifest                    // → 完整 manifest 对象
 api.getSetting("key", default)   // → 读取设置
 api.setSetting("key", value)     // → 写入 + 持久化
 api.getAllSettings()             // → 全部设置对象
+api.onSettingChange(fn)          // → 订阅设置变更 (偏好面板修改时触发, 参数 key, value)
 
 // 命令 (自动加 "my-plugin:" 前缀)
 api.registerCommand("hello", fn, "描述")  // → 注册为 "my-plugin:hello"
@@ -313,6 +316,38 @@ window.BetterTypora.commands.execute('tabs:create-untitled');
 | `enabled` | bool | | 默认 `true`, `false` 则只加载不启用 |
 | `hotkeys` | array | | 快捷键列表, enable 时注册, disable 时清除 |
 | `settings` | object | | 默认设置, 运行时修改持久化到 `.cache/` |
+| `settingsSchema` | array | | 偏好设置面板的设置项 UI 描述 (见下节) |
+
+### settingsSchema 条目 — 偏好设置面板
+
+在 Typora **偏好设置 → 插件** 页面，每个插件行右侧有一个齿轮按钮（SVG），点击展开该插件的设置面板。面板中的设置项由 `manifest.settingsSchema` 声明，插件**无需写任何 UI 代码**：
+
+```json
+{
+  "id": "tabs",
+  "settings": { "autoHideTabbar": false },
+  "settingsSchema": [
+    {
+      "key": "autoHideTabbar",
+      "label": "自动隐藏标签栏",
+      "type": "boolean",
+      "default": false,
+      "desc": "鼠标离开标签栏后自动收起隐藏, 移回顶部区域重新展开"
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `key` | string | 设置键名, 对应 `settings` 中的键 |
+| `label` | string | 面板中显示的设置名 |
+| `type` | string | 控件类型: `boolean`(开关) \| `number`(数字输入) \| `text`(文本输入) \| `select`(下拉, 需 `options` 数组) |
+| `default` | any | 默认值 (未持久化时使用) |
+| `desc` | string | 可选, 设置项下方的说明文字 |
+| `options` | array | `select` 类型必填, 下拉选项列表 |
+
+**交互链路**：面板中修改 → ipc 发回主文档 → `PluginManager.updateSetting`（持久化到 `.cache/` + 触发该插件全部 `onSettingChange` 回调）→ 插件实时应用。面板展开状态在数据推送重渲染后保持。
 
 ### hotkeys 条目
 
