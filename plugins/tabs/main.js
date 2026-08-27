@@ -52,6 +52,9 @@ var tabStore = {
             // 激活会导致高亮落空 (split-view 用 visual-activate 管理高亮)
             if (isExcluded(filePath)) return existing.id;
             this.activateTab(existing.id);
+            // 立即刷新高亮 — 原依赖 _restoreScrollAfterOpen 轮询
+            // (等 Typora 渲染完成标志), 分屏迁移场景会滞后导致高亮不更新
+            tabBarUI.render();
             return existing.id;
         }
 
@@ -86,6 +89,7 @@ var tabStore = {
         // 插在末尾 (positional, not MRU)
         this.tabs.push(tab);
         this.activateTab(tab.id);
+        tabBarUI.render();   // 立即刷新高亮 (同 existing 分支)
         logger.log("标签已创建: " + fileName + " (" + this.tabs.length + " 个标签)");
         return tab.id;
     },

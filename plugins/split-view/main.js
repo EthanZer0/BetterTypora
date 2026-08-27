@@ -208,11 +208,42 @@ function updateDirty() {
 
 /* ------------------------------------------------------------------ */
 /* 右栏标签栈                                                           */
+/* 条目模型: {type:"file", path, name} | {type:"graph"} (知识图谱)       */
+/* 所有"激活条目内容应用"走 applyRightPane — 文件 → 预览/编辑器,          */
+/* 图谱 → 图谱面板; 变更后统一调用, 避免各处手写 openFile/syncPanes 分支   */
 /* ------------------------------------------------------------------ */
+
+function isGraphTab(tab) {
+    return !!(tab && tab.type === "graph");
+}
+
+/** 当前激活的右栏条目 (无则 null) */
+function activeRightTab() {
+    return _rightActive >= 0 ? _rightTabs[_rightActive] : null;
+}
+
+/** 应用右栏当前激活条目到对应面板 (变更后统一入口) */
+function applyRightPane() {
+    var tab = activeRightTab();
+    if (!tab) {
+        syncPanes();
+        return;
+    }
+    if (isGraphTab(tab)) {
+        mountGraphPane();   // 图谱面板 (graph-view 嵌入, 第二阶段)
+        return;
+    }
+    if (_activeSide === "right") {
+        if (tab.path !== BetterTypora.getCurrentFile()) BetterTypora.openFile(tab.path);
+    } else {
+        syncPanes();
+    }
+}
 
 function findRightTab(filePath) {
     for (var i = 0; i < _rightTabs.length; i++) {
-        if (_rightTabs[i].path === filePath) return i;
+        var t = _rightTabs[i];
+        if (!isGraphTab(t) && t.path === filePath) return i;
     }
     return -1;
 }
@@ -224,7 +255,7 @@ function addRightTab(filePath) {
         renderRightTabs();
         return;
     }
-    _rightTabs.push({ path: filePath, name: path.basename(filePath) });
+    _rightTabs.push({ type: "file", path: filePath, name: path.basename(filePath) });
     _rightActive = _rightTabs.length - 1;
     renderRightTabs();
 }
@@ -233,12 +264,7 @@ function selectRightTab(idx) {
     if (idx < 0 || idx >= _rightTabs.length) return;
     _rightActive = idx;
     renderRightTabs();
-    if (_activeSide === "right") {
-        var fp = _rightTabs[idx].path;
-        if (fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
-    } else {
-        syncPanes();
-    }
+    applyRightPane();
 }
 
 function adjustRightActive(idx) {
@@ -250,37 +276,34 @@ function adjustRightActive(idx) {
 
 /** 文件不再被右栈持有 → 通知 tabs 移出排除集 */
 function maybeUnexclude(filePath) {
-    if (findRightTab(filePath) < 0) {
+    if (filePath && findRightTab(filePath) < 0) {
         tabsCmd("set-excluded", filePath, false);
     }
 }
 
 function closeRightTab(idx) {
     if (idx < 0 || idx >= _rightTabs.length) return;
-    var closed = _rightTabs[idx].path;
+    var closed = _rightTabs[idx];
     _rightTabs.splice(idx, 1);
-    _closedStack.push(closed);
-    if (_closedStack.length > MAX_CLOSED) _closedStack.shift();
+    if (!isGraphTab(closed)) {
+        _closedStack.push(closed.path);
+        if (_closedStack.length > MAX_CLOSED) _closedStack.shift();
+    }
     adjustRightActive(idx);
     renderRightTabs();
-    maybeUnexclude(closed);
+    if (!isGraphTab(closed)) maybeUnexclude(closed.path);
 
     afterRightTabsChanged();
 }
 
-/** 右栈变化后: 空 → 自动关闭分屏; 否则活动栏同步 / 预览刷新 */
+/** 右栈变化后: 空 → 自动关闭分屏; 否则应用激活条目 */
 function afterRightTabsChanged() {
     if (_rightTabs.length === 0) {
         // 右栏没有任何标签 → 自动关闭分屏
         disable();
         return;
     }
-    if (_activeSide === "right") {
-        var fp = _rightTabs[_rightActive].path;
-        if (fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
-    } else {
-        syncPanes();
-    }
+    applyRightPane();
 }
 
 function renderRightTabs() {
@@ -646,10 +669,8 @@ function sendToRight(filePath) {
     }
     if (_activeSide === "right") {
         // 焦点已在右栏 (左栏是预览): setActiveSide 不会迁移 —
-        // 左栏预览刷新为邻近标签, 同时右栏编辑器打开新激活标签
-        // (addRightTab 只切换 tabs 高亮, 不切换编辑器文件)
-        var act = _rightTabs[_rightActive].path;
-        if (act && act !== BetterTypora.getCurrentFile()) BetterTypora.openFile(act);
+        // 应用右栏新激活条目 (编辑器打开), 左栏预览刷新为邻近标签
+        applyRightPane();
         syncPanes();
     } else {
         setActiveSide("right");
@@ -660,7 +681,9 @@ function sendToRight(filePath) {
 /** 右标签右键: 发送到左栏 (移出排除集, 标签恢复, 编辑器回左栏) */
 function sendToLeft(idx) {
     if (idx < 0 || idx >= _rightTabs.length) return;
-    var fp = _rightTabs[idx].path;
+    var tab = _rightTabs[idx];
+    if (isGraphTab(tab)) return;   // 图谱面板不可发送到左栏
+    var fp = tab.path;
     _rightTabs.splice(idx, 1);
     adjustRightActive(idx);
     renderRightTabs();
@@ -677,6 +700,9 @@ function sendToLeft(idx) {
         // 右栏预览刷新为邻近标签
         if (fp && fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
         syncPanes();
+        // 左栏标签栏高亮同步 (发送文件已回标签栏; addOrActivate 已
+        // 立即 render, 此处显式同步保证与左栏预览一致)
+        try { tabsCmd("visual-activate", fp); } catch (e) {}
     } else {
         setActiveSide("left");
     }
@@ -685,6 +711,11 @@ function sendToLeft(idx) {
 /* ------------------------------------------------------------------ */
 /* 预览渲染                                                             */
 /* ------------------------------------------------------------------ */
+
+/** 右栏图谱面板挂载 (graph-view 嵌入, 第二阶段实现) */
+function mountGraphPane() {
+    // TODO(第二阶段): 在右栏内容区挂载嵌入式知识图谱, 跟随当前文件
+}
 
 function renderPreviewInto(container, filePath) {
     if (!filePath) {
@@ -740,10 +771,23 @@ function doActivate(side) {
     // 活动栏切换: 贴片瞬移 (无过渡)
     syncEditor();
     syncPanes();
-    // Typora 加载后的自动补渲染 renderUnder(document) 会查询全文档公式块,
-    // 预览容器公式块 (被 syncPanes 清空/重建) 会触发 A 的 contains 检查
-    // 失败 → 批量渲染中断 → 编辑器公式停在源码态。手动限定 #write 范围
-    // 补渲染 (false = 只处理未渲染的公式块, 已渲染的不受影响)
+    afterActivate();
+}
+
+/** 活动栏切换后的统一收尾 (历史补丁归并):
+ * 1. 标签栏高亮跟随编辑器当前文件 — 无 opened 事件的迁移路径
+ *    (发送的是当前文件时 setActiveSide 不 openFile; 500ms 同路径
+ *    opened 去重) 不会触发 tabs addOrActivate, 此处显式同步;
+ *    右栏迁移时当前文件在排除集, visual-activate 无可见标签不生效
+ * 2. 公式补渲染 — Typora 加载后的自动补渲染 renderUnder(document)
+ *    会查询全文档公式块, 预览容器公式块 (被 syncPanes 清空/重建) 会
+ *    触发 A 的 contains 检查失败 → 批量渲染中断 → 编辑器公式停在源码
+ *    态。手动限定 #write 范围补渲染 (false = 只处理未渲染的公式块) */
+function afterActivate() {
+    try {
+        var cur = BetterTypora.getCurrentFile();
+        if (cur) tabsCmd("visual-activate", cur);
+    } catch (e) {}
     setTimeout(function () {
         if (!_active) return;
         try {
@@ -874,51 +918,62 @@ function onFileOpened(data) {
     var fp = data && data.path;
     if (!fp) return;
 
-    // 挂起迁移: 目标文件加载完成 → 迁移贴片
-    // 注意: 不能 return — 滚动恢复代码在函数末尾, return 会跳过它
-    // (曾导致带 scrollOffset 的 recoverPosOrScroll 从不执行)
-    if (_pendingSide) {
-        var targetSide = _pendingSide;
-        var want = targetSide === "right"
-            ? (_rightActive >= 0 ? _rightTabs[_rightActive].path : null)
-            : _leftPreviewPath;
-        if (want === fp) {
-            _pendingSide = null;
-            doActivate(targetSide);
-        } else {
-            _pendingSide = null;
-        }
-    }
+    handlePendingMigration(fp);
 
     if (_activeSide === "left") {
         _leftPreviewPath = fp;
     } else {
-        var idx = findRightTab(fp);
-        if (idx >= 0) {
-            if (idx !== _rightActive) {
-                _rightActive = idx;
-                renderRightTabs();
-                // 预览内容同步到新激活标签 — 否则预览内容与标签脱节
-                // (预览还显示旧文件, 点击切换时编辑器加载新文件 → "跳顶部")
-                syncPanes();
-            }
-        } else {
-            // 左栏标签/外部切换 → 编辑器回左栏 (Typora 已切, 不重复 openFile)
-            _leftPreviewPath = fp;
-            doActivate("left");
-        }
-        // openFile 触发 tabs 插件 addOrActivate 激活被排除的发送文件
-        // (不可见) — 覆盖左栏预览邻近标签的高亮; 打开完成后重新同步
-        if (_leftPreviewPath) {
-            setTimeout(function () {
-                if (!_active || _activeSide !== "right") return;
-                try { tabsCmd("visual-activate", _leftPreviewPath); } catch (e) {}
-            }, 100);
-        }
+        syncRightPaneOnFileOpened(fp);
     }
 
-    // 滚动恢复: 由包装的 recoverPosOrScroll (enable 时安装) 在 Typora
-    // 恢复时注入 scrollOffset — 一次到位, 无需延迟复查
+    // openFile 触发 tabs 插件 addOrActivate 激活被排除的发送文件
+    // (不可见) — 覆盖左栏预览邻近标签的高亮; 打开完成后重新同步
+    resyncTabHighlight();
+}
+
+/** 挂起迁移: 目标文件加载完成 → 迁移贴片。
+ * 注意: 不能提前 return — 后面的左栏预览/高亮同步仍需执行
+ * (曾导致带 scrollOffset 的 recoverPosOrScroll 从不执行) */
+function handlePendingMigration(fp) {
+    if (!_pendingSide) return;
+    var targetSide = _pendingSide;
+    var want = targetSide === "right"
+        ? (_rightActive >= 0 ? _rightTabs[_rightActive].path : null)
+        : _leftPreviewPath;
+    if (want === fp) {
+        _pendingSide = null;
+        doActivate(targetSide);
+    } else {
+        _pendingSide = null;
+    }
+}
+
+/** 焦点在右栏时文件打开后的右栏同步:
+ * 右栈内 → 激活对应标签并同步预览; 右栈外 (左栏/外部切换) → 编辑器回左栏 */
+function syncRightPaneOnFileOpened(fp) {
+    var idx = findRightTab(fp);
+    if (idx >= 0) {
+        if (idx !== _rightActive) {
+            _rightActive = idx;
+            renderRightTabs();
+            // 预览内容同步到新激活标签 — 否则预览内容与标签脱节
+            // (预览还显示旧文件, 点击切换时编辑器加载新文件 → "跳顶部")
+            syncPanes();
+        }
+    } else {
+        // 左栏标签/外部切换 → 编辑器回左栏 (Typora 已切, 不重复 openFile)
+        _leftPreviewPath = fp;
+        doActivate("left");
+    }
+}
+
+/** 延迟重同步左栏标签栏高亮 (openFile 会激活被排除的发送文件覆盖高亮) */
+function resyncTabHighlight() {
+    if (!_leftPreviewPath) return;
+    setTimeout(function () {
+        if (!_active || _activeSide !== "right") return;
+        try { tabsCmd("visual-activate", _leftPreviewPath); } catch (e) {}
+    }, 100);
 }
 
 /**
