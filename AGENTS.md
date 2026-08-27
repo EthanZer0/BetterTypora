@@ -40,17 +40,6 @@ AGENTS.md                    # 本文件
 - **验证需重启 Typora**（渲染进程注入，无热重载 CSS）。
 - 测试用文件（`*测试*.md` 等）**不进 git**，提交前检查 `git status`。
 
-## 已知陷阱（踩过的坑，改相关代码前必读）
-
-1. **CSSOM 无法展开含 `var()` 的简写属性**——`getPropertyValue("background")` 对 `background: var(--x)` 返回空，不要依赖简写读值。
-2. **`.bt-editor-fixed *` 禁动画规则**（split-view）会误伤 content 内标签栏拖拽缓动——已用 `:not(#typora-tab-bar):not(#typora-tab-bar *)` 排除，新增 fixed 贴片内容时注意同类问题。
-3. **flex 子项收起动画**：`flex-basis` 置 0 会让 flex 布局立即重排、绕过 `height` 过渡（收起瞬跳）。收缩动画只改 `height`，不要动 flex-basis。
-4. **图谱 `graphView` 是共享单例**（bidirectional-links 模块级）——分屏关闭只能 `close()`（已释放 GPU/worker），**绝不能 `destroy()`**（永久终结单例，图谱按钮从此无反应）。
-5. **图谱相机**：缩放 lerp 插值期间每帧按锚点重写 `_ox/_oy` 会覆盖拖拽平移——mousedown 时需先 snap 完成缩放（graph-renderer.js `_md` 已有实现，改动相机代码注意保持）。
-6. **嵌入容器失效**：`GraphView.open()` 前检查 `_embedContainer` 是否 `document.contains`，detached 时重置为 null（分屏关闭后全屏图谱挂 body）。
-7. **Typora 升级会覆盖 `window.html`**——需重新添加注入行；`resources/plugins/` 不受影响。
-8. **偏好设置面板注入**是 webview 内嵌 JS 字符串（`BT_PREF_INJECT_JS`），改面板 UI 时注意字符串转义层级（`\\'` 双层）与 `isTrusted` 过滤。
-
 ## 提交规范
 
 - 提交信息用 conventional commits：`feat:` / `fix:` / `style:` / `docs:` / `chore:`，中文描述。
