@@ -53,6 +53,7 @@ var backlinksPanel = null;
 var fileWatcher = null;
 var highlightRenderer = null;
 var _onFileOpenUnsub = null;
+var _onSavedUnsub = null;   // 保存完成事件订阅 (saved → 索引增量 + 图谱刷新)
 var _clickHandler = null;
 var _guardInterval = null;
 var _initialized = false;
@@ -237,6 +238,15 @@ var _onFileOpenUnsub = null;
 function installFileOpenListener() {
     if (_onFileOpenUnsub) return;
     _onFileOpenUnsub = BetterTypora.onFileOpen(onFileOpened);
+    // 保存完成 → 增量索引 + 图谱刷新 (精确时机, 替代文件轮询检测延迟)
+    if (!_onSavedUnsub) {
+        _onSavedUnsub = BetterTypora.onFileEvent("saved", function (data) {
+            var fp = data && data.path;
+            if (!fp || !linkIndex) return;
+            linkIndex.indexFile(fp);
+            scheduleGraphRefresh();
+        });
+    }
     logger.log("已注册文件切换监听");
 }
 
@@ -244,6 +254,10 @@ function uninstallFileOpenListener() {
     if (_onFileOpenUnsub) {
         BetterTypora.offFileOpen(_onFileOpenUnsub);
         _onFileOpenUnsub = null;
+    }
+    if (_onSavedUnsub) {
+        BetterTypora.offFileEvent("saved", _onSavedUnsub);
+        _onSavedUnsub = null;
     }
 }
 
@@ -640,6 +654,10 @@ function onFileChanged(filePath) {
         backlinksPanel.update(currentFile);
     }
 
+    // 图谱 (若打开) 增量刷新 — 编辑新增/删除双向链接后响应更新,
+    // 防抖合并 (输入暂停 800ms 才重建, 避免编辑过程反复重建)
+    scheduleGraphRefresh();
+
     // 定期持久化（文件变更后延迟 5 秒持久化）
     if (_persistTimer) _timers.clearTimeout(_persistTimer);
     _persistTimer = _timers.setTimeout(function () {
@@ -649,6 +667,21 @@ function onFileChanged(filePath) {
 }
 
 var _persistTimer = null;
+
+// 图谱防抖刷新 (Obsidian 式: 编辑文件后图谱增量响应)
+var _graphRefreshTimer = null;
+function scheduleGraphRefresh() {
+    if (!graphView || !graphView.isOpen || !graphView.isOpen()) return;
+    if (_graphRefreshTimer) _timers.clearTimeout(_graphRefreshTimer);
+    _graphRefreshTimer = _timers.setTimeout(function () {
+        _graphRefreshTimer = null;
+        try {
+            if (graphView && graphView.isOpen && graphView.isOpen()) {
+                graphView.refresh();
+            }
+        } catch (e) {}
+    }, 800);
+}
 
 // ===================================================================
 // 守护

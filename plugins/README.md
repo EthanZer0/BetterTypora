@@ -137,7 +137,7 @@ BetterTypora.getMountFolder()    // → string | null  打开的工作区根目�
 BetterTypora.openFile(path)      // → 切换到指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 
-// 文件事件 — 统一捕获 Typora 文件打开/切换/关闭/删除/改名
+// 文件事件 — 统一捕获 Typora 文件打开/切换/关闭/删除/改名/保存
 BetterTypora.onFileEvent(type, fn)   // → 订阅事件, 返回取消函数
 BetterTypora.offFileEvent(unsubFn)   // → 取消订阅
 BetterTypora.onFileOpen(fn)          // → 兼容旧接口: fn(filePath), 文件打开完成时触发
@@ -209,6 +209,7 @@ BetterTypora.settings.set("plugin-id", "key", value)
 | `closing` | `{path, mountFolder}` | 窗口关闭前 |
 | `deleted` | `{path, originalPath}` | 当前文件被外部删除（bundle.filePath 已清空） |
 | `renamed` | `{path, previousPath}` | 文件重命名/另存为 |
+| `saved` | `{path}` | 文件**保存完成**（自动保存/手动保存/另存为） |
 
 ```js
 var unsub = BetterTypora.onFileEvent("opened", function (data) {
@@ -220,6 +221,7 @@ BetterTypora.offFileEvent(unsub);
 **实现原理**（多数据源 + 兜底）：
 - hook `File.loadFile` → `opening`（渲染进程加载入口）
 - hook `File.onFileOpened` / `File.setDocumentState` → `opened`（加载完成 / 主进程状态推送）
+- 包装 `File.FileSave.saveUseNode` / `saveAsUseNode` → `saved`（异步保存完成后，精确的自动保存时机，替代文件轮询检测）
 - 包装 `JSBridge.invoke` → `opening`(新建) / `closing`(关窗)
 - 轮询 `File.bundle`（500ms）→ `deleted` / `renamed` 兜底（bundle 引用变化=打开，仅路径变化=改名）
 

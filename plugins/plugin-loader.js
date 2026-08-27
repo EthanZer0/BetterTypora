@@ -1464,7 +1464,39 @@
                 installed++;
             }
             if (installed > 0) systemLogger.log("文件事件 hook 已安装 (" + installed + " 个)");
+            _installSaveHook();
             return installed === 3;
+        }
+
+        /** 包装保存函数 — 保存完成后 emit "saved" (精确的自动保存时机,
+         *  替代文件变更轮询检测; 自动保存/手动保存/切换保存统一走
+         *  File.FileSave.saveUseNode / saveAsUseNode) */
+        function _installSaveHook() {
+            if (typeof File === "undefined") return;
+            var saveTarget = File.FileSave || null;
+            if (!saveTarget) return;
+            var saveNames = ["saveUseNode", "saveAsUseNode"];
+            for (var si = 0; si < saveNames.length; si++) {
+                var name = saveNames[si];
+                if (_fileHooks[name] || typeof saveTarget[name] !== "function") continue;
+                var origFn = saveTarget[name];
+                _fileHooks[name] = origFn;
+                saveTarget[name] = function () {
+                    var r = origFn.apply(this, arguments);
+                    try {
+                        if (r && typeof r.then === "function") {
+                            r.then(function () {
+                                try {
+                                    var p = (File && File.bundle && File.bundle.filePath) || null;
+                                    _emitFileEvent("saved", { path: p });
+                                } catch (e) {}
+                            });
+                        }
+                    } catch (e) {}
+                    return r;
+                };
+                systemLogger.log("已包装 " + name + " (保存完成事件)");
+            }
         }
 
         /** 包装 JSBridge.invoke — 观测主进程调用 (幂等) */
