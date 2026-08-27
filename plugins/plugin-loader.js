@@ -819,20 +819,36 @@
     };
 
     /**
-     * 扫描并加载所有插件, 根据 manifest.enabled 决定是否启用
+     * 扫描并加载所有插件, 根据 manifest.enabled 决定是否启用。
+     * 分片加载 (每片一个插件, 片间 setTimeout 让出主线程) — 插件多/重时
+     * 避免启动一次性同步阻塞, Typora 界面先可用; 慢插件耗时输出日志
      */
-    PluginManager.prototype.loadAll = function () {
+    PluginManager.prototype.loadAll = function (onComplete) {
         var descriptors = this.scan();
-        for (var i = 0; i < descriptors.length; i++) {
-            var d = descriptors[i];
-            if (this.load(d)) {
-                // manifest.enabled 默认为 true
-                if (d.manifest.enabled !== false) {
-                    this.enable(d.manifest.id);
-                }
+        var self = this;
+        var idx = 0;
+        function next() {
+            if (idx >= descriptors.length) {
+                self._logger.log("已加载 " + self._loadOrder.length + " 个插件: " + self._loadOrder.join(", "));
+                if (onComplete) onComplete();
+                return;
             }
+            var d = descriptors[idx++];
+            var t0 = Date.now();
+            try {
+                if (self.load(d)) {
+                    if (d.manifest.enabled !== false) {
+                        self.enable(d.manifest.id);
+                    }
+                }
+            } catch (e) {
+                self._logger.error("加载插件异常: " + d.manifest.id + " → " + e.message);
+            }
+            var cost = Date.now() - t0;
+            if (cost > 5) self._logger.log("插件 " + d.manifest.id + " 加载耗时 " + cost + "ms");
+            setTimeout(next, 0);
         }
-        this._logger.log("已加载 " + this._loadOrder.length + " 个插件: " + this._loadOrder.join(", "));
+        next();
     };
 
     PluginManager.prototype.get = function (pluginId) {
@@ -2050,11 +2066,23 @@
             // Toast 通知 (BetterTypora.toast(message, duration))
             // 其他插件可直接用 BetterTypora.toast("消息") 不必各自实现
             // 多个 toast 向下堆叠，通过递归 _layout(i) 计算每个 toast 的偏移
+            // 毛玻璃风格: 半透明主题背景 + backdrop blur, 深浅主题自适应
+            // (--bg-color/--text-color 变量 + color-mix; 旧 Chromium 无
+            // color-mix 时回退半透明深色)
             toast: (function () {
-                var _baseCss = "position:fixed;top:60px;left:50%;z-index:99999;" +
-                    "background:#2d2925;color:#faf9f5;padding:10px 24px;border-radius:8px;" +
+                var _baseCss = "position:fixed;top:44px;left:50%;z-index:99999;" +
+                    "background:rgba(45,41,37,0.82);" +   // color-mix fallback
+                    "background:color-mix(in srgb,var(--bg-color,#ffffff) 72%,transparent);" +
+                    "color:var(--text-color,#333);" +
+                    "-webkit-backdrop-filter:blur(14px) saturate(160%);" +
+                    "backdrop-filter:blur(14px) saturate(160%);" +
+                    "border:1px solid color-mix(in srgb,var(--window-border,#ddd) 55%,transparent);" +
+                    "padding:10px 24px;border-radius:10px;" +
                     "font-family:var(--font-sans,sans-serif);font-size:14px;" +
-                    "box-shadow:0 4px 18px rgba(0,0,0,0.25);" +
+                    // 阴影色跟随文字色: 浅色主题深文字 → 深阴影;
+                    // 深色主题浅文字 → 浅阴影 (黑色阴影在深背景上不可见)
+                    "box-shadow:0 8px 32px color-mix(in srgb,var(--text-color,#333) 18%,transparent)," +
+                    "0 2px 8px color-mix(in srgb,var(--text-color,#333) 10%,transparent);" +
                     "transition:opacity 0.35s ease,transform 0.35s ease;" +
                     "white-space:pre-line;opacity:0";
                 var _stack = [];   // 当前存活的 toast 元素（从旧到新）
@@ -2130,22 +2158,22 @@
             hotkeys: hotkeyManager,
         });
 
-        // 异步加载插件 + 菜单注入
+        // 异步分片加载插件 (loadAll 完成后回调) + 菜单注入
         setTimeout(function () {
-            pluginManager.loadAll();
-            eventBus.emit("plugin-system:ready");
-            systemLogger.log("初始化完成 ✅");
-            // BetterTypora 加载完成 — 弹窗提示
-            (window.BetterTypora || {}).toast && window.BetterTypora.toast(
-                "🧩 BetterTypora 已就绪 (" + pluginManager.list().length + " 个插件)", 1500
-            );
+            pluginManager.loadAll(function () {
+                eventBus.emit("plugin-system:ready");
+                systemLogger.log("初始化完成 ✅");
+                // BetterTypora 加载完成 — 弹窗提示
+                (window.BetterTypora || {}).toast && window.BetterTypora.toast(
+                    "🧩 BetterTypora 已就绪 (" + pluginManager.list().length + " 个插件)", 1500
+                );
 
-            // 偏好设置面板: 监听 webview 出现, 注入"插件"栏目
-            _btWatchPreferencePanel();
+                // 偏好设置面板: 监听 webview 出现, 注入"插件"栏目
+                _btWatchPreferencePanel();
 
-            // 菜单注入: 每 500ms 检查 megamenu 是否有我们的元素,
-            // frame.js 可能随时重建 innerHTML, 需要持续守护
-            var _injectMenu = function () {
+                // 菜单注入: 每 500ms 检查 megamenu 是否有我们的元素,
+                // frame.js 可能随时重建 innerHTML, 需要持续守护
+                var _injectMenu = function () {
                 var menuList = document.getElementById("megamenu-menu-list");
                 // 未就绪 或 已注入 → 稍后重试
                 if (!menuList || !menuList.children.length || !menuList.children[0].nodeName ||
@@ -2305,6 +2333,7 @@
                 setTimeout(_injectMenu, 500);
             };
             _injectMenu();
+            });
         }, 0);
 
         // 输出快速开始指南
