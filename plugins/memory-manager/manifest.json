@@ -2,13 +2,52 @@
   "id": "memory-manager",
   "name": "Memory Manager",
   "version": "2.0.0",
-  "description": "内存优化器: 空闲时自动强制GC收缩JS堆 + 清理webview缓存, 手动命令立即整理 (无UI)",
+  "description": "内存优化器: 空闲时自动强制GC收缩JS堆 + 清理webview缓存, 手动命令立即整理",
   "author": "BetterTypora",
   "main": "main.js",
   "enabled": true,
   "settings": {
     "optimizeIntervalMinutes": 15,
     "optimizeIdleMinutes": 5,
-    "trimIntervalMinutes": 30
-  }
+    "trimIntervalMinutes": 30,
+    "webviewClearIntervalMinutes": 60
+  },
+  "settingsSchema": [
+    {
+      "key": "optimizeIdleMinutes",
+      "label": "空闲判定时间",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 60,
+      "desc": "无编辑操作多少分钟后视为空闲, 空闲后才执行自动整理 (分钟)"
+    },
+    {
+      "key": "optimizeIntervalMinutes",
+      "label": "自动整理间隔",
+      "type": "number",
+      "default": 15,
+      "min": 5,
+      "max": 120,
+      "desc": "空闲状态下每隔多少分钟自动执行一次内存整理 (强制 GC + webview 缓存清理)"
+    },
+    {
+      "key": "trimIntervalMinutes",
+      "label": "工作集修剪间隔",
+      "type": "number",
+      "default": 30,
+      "min": 5,
+      "max": 240,
+      "desc": "空闲时每隔多少分钟修剪一次工作集 (让出驻留物理内存; 切回时有短暂缺页)"
+    },
+    {
+      "key": "webviewClearIntervalMinutes",
+      "label": "webview 缓存清理限频",
+      "type": "number",
+      "default": 60,
+      "min": 5,
+      "max": 1440,
+      "desc": "自动整理时清理 webview 缓存的最小间隔; 手动整理不受此限制 (分钟)"
+    }
+  ]
 }

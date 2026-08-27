@@ -181,9 +181,10 @@ function optimize(manual) {
     var after = heapUsedNow();
     var freed = before - after;
 
-    // webview 缓存: 手动整理不受限频; 自动整理限 1h 一次
+    // webview 缓存: 手动整理不受限频; 自动整理限频 (默认 1h, 可设置)
     var now = Date.now();
-    if (manual || now - lastWebviewClearAt > 3600000) {
+    var clearIntervalMs = api.getSetting("webviewClearIntervalMinutes", 60) * 60000;
+    if (manual || now - lastWebviewClearAt > clearIntervalMs) {
         clearWebviewCaches();
         lastWebviewClearAt = now;
     }
