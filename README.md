@@ -35,6 +35,16 @@
 
 ## 安装
 
+**方式一：安装脚本（推荐，Windows）**
+
+1. 下载仓库到本地（或 `git clone`）
+2. 双击运行 `install.bat`（或命令行执行 `install.ps1`）——自动定位 Typora 安装目录、备份并注入 `window.html`、复制插件目录
+3. 重启 Typora
+
+> 脚本幂等（重复运行不重复注入）、自动备份原文件（`window.html.bettertypora.bak`）；卸载：`install.bat -Uninstall`；Typora 装在非标准路径时：`install.bat -TyporaDir "D:\Tools\Typora\resources"`
+
+**方式二：手动安装**
+
 1. 将 `plugins/` 目录复制到 Typora 的 `resources/` 下
 2. 在 `resources/window.html` 的 `</body>` 前添加：`<script src="./plugins/plugin-loader.js"></script>`
 3. 重启 Typora — 插件系统自动启动

@@ -1,0 +1,157 @@
+﻿# =====================================================================
+# BetterTypora 安装器
+# =====================================================================
+# 用法:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Uninstall
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -TyporaDir "D:\Tools\Typora\resources"
+#
+# 功能:
+#   1. 自动定位 Typora 的 resources 目录 (运行进程 / 常见安装路径 / 显式指定)
+#   2. 备份 window.html → window.html.bettertypora.bak
+#   3. 幂等注入 <script src="./plugins/plugin-loader.js"> (已注入则跳过)
+#   4. 复制 plugins/ 目录 (含 plugin-loader.js)
+#   5. -Uninstall: 移除注入行恢复原样 (插件目录保留)
+# =====================================================================
+
+param(
+    [string]$TyporaDir = "",
+    [switch]$Uninstall,
+    [switch]$NoBackup
+)
+
+$ErrorActionPreference = "Stop"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$pluginsSrc = Join-Path $scriptDir "plugins"
+$injectLine = '<script src="./plugins/plugin-loader.js"></script>'
+
+function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
+function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
+function Write-Err($msg)  { Write-Host "!!  $msg" -ForegroundColor Red }
+
+# ---------------------------------------------------------------------
+# 定位 Typora resources 目录
+# ---------------------------------------------------------------------
+function Find-TyporaResources {
+    if ($TyporaDir) {
+        if (Test-Path $TyporaDir) { return $TyporaDir }
+        Write-Err "指定的目录不存在: $TyporaDir"
+        exit 1
+    }
+    # 1. 正在运行的 Typora 进程 (最可靠)
+    try {
+        $proc = Get-Process typora -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($proc -and $proc.Path -and (Test-Path $proc.Path)) {
+            $res = Join-Path (Split-Path -Parent $proc.Path) "resources"
+            if (Test-Path $res) { return $res }
+        }
+    } catch {}
+    # 2. 常见安装路径
+    $candidates = @(
+        "$env:ProgramFiles\Typora\resources",
+        "${env:ProgramFiles(x86)}\Typora\resources",
+        "$env:LOCALAPPDATA\Programs\Typora\resources",
+        "$env:LOCALAPPDATA\Typora\resources",
+        "$env:USERPROFILE\scoop\apps\typora\current\resources"
+    )
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return $c }
+    }
+    return $null
+}
+
+# ---------------------------------------------------------------------
+# 读写 window.html (保持原编码, 保留/不保留 BOM 与原文件一致)
+# ---------------------------------------------------------------------
+function Read-Html([string]$path) {
+    return [System.IO.File]::ReadAllText($path)   # 自动检测编码 (UTF-8/BOM/ANSI)
+}
+
+function Write-Html([string]$path, [string]$text, [bool]$hadBom) {
+    $utf8 = New-Object System.Text.UTF8Encoding($hadBom)
+    [System.IO.File]::WriteAllText($path, $text, $utf8)
+}
+
+function Test-HtmlHasBom([string]$path) {
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    return ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+}
+
+# ---------------------------------------------------------------------
+# 主流程
+# ---------------------------------------------------------------------
+Write-Step "BetterTypora 安装器 v1.0.0"
+
+if (-not (Test-Path $pluginsSrc)) {
+    Write-Err "未找到插件目录: $pluginsSrc (请把 install.ps1 放在仓库根目录运行)"
+    exit 1
+}
+
+$resources = Find-TyporaResources
+if (-not $resources) {
+    Write-Err "未找到 Typora 安装目录。请先启动一次 Typora, 或用 -TyporaDir 显式指定 resources 目录:"
+    Write-Err '  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -TyporaDir "D:\Tools\Typora\resources"'
+    exit 1
+}
+Write-Ok "Typora resources: $resources"
+
+$windowHtml = Join-Path $resources "window.html"
+if (-not (Test-Path $windowHtml)) {
+    Write-Err "window.html 不存在: $windowHtml (目录不对?)"
+    exit 1
+}
+
+# --- 注入/移除注入行 ---
+$hadBom = Test-HtmlHasBom $windowHtml
+$html = Read-Html $windowHtml
+$already = $html -match 'src="\./plugins/plugin-loader\.js"'
+
+if ($Uninstall) {
+    Write-Step "卸载模式: 移除注入行"
+    if (-not $already) {
+        Write-Ok "window.html 未包含 BetterTypora 注入, 无需处理"
+    } else {
+        if (-not $NoBackup) {
+            Copy-Item $windowHtml "$windowHtml.bettertypora.bak" -Force
+            Write-Ok "已备份原文件: window.html.bettertypora.bak"
+        }
+        $html = $html -replace '<script src="\./plugins/plugin-loader\.js">\s*', ""
+        Write-Html $windowHtml $html $hadBom
+        Write-Ok "已移除注入行。plugins/ 目录保留, 手动删除 resources/plugins/ 即完全清除"
+    }
+    Write-Ok "卸载完成"
+    exit 0
+}
+
+# --- 安装 ---
+Write-Step "安装"
+if ($already) {
+    Write-Ok "window.html 已注入过, 跳过注入"
+} else {
+    if (-not $NoBackup) {
+        Copy-Item $windowHtml "$windowHtml.bettertypora.bak" -Force
+        Write-Ok "已备份原文件: window.html.bettertypora.bak"
+    }
+    if ($html -match '(?i)</body>') {
+        $html = $html -replace '(?i)</body>', "$injectLine</body>"
+    } else {
+        $html = $html.TrimEnd() + "`r`n$injectLine"   # 无 </body> 兜底: 追加末尾
+    }
+    Write-Html $windowHtml $html $hadBom
+    Write-Ok "注入完成: $injectLine"
+}
+
+# --- 复制插件目录 ---
+$pluginsDest = Join-Path $resources "plugins"
+if (Test-Path $pluginsDest) {
+    # 只更新不删除: 保留用户已有的 .cache 与自定义插件
+    Copy-Item (Join-Path $pluginsSrc "*") -Destination $pluginsDest -Recurse -Force
+    Write-Ok "插件目录已更新: $pluginsDest (已存在的插件覆盖, 其余保留)"
+} else {
+    Copy-Item $pluginsSrc -Destination $pluginsDest -Recurse -Force
+    Write-Ok "插件目录已复制: $pluginsDest"
+}
+
+Write-Step "完成"
+Write-Host ""
+Write-Host "  请完全退出并重启 Typora (设置 → 插件 页面可查看/开关插件)" -ForegroundColor Yellow
