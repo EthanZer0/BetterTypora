@@ -346,6 +346,7 @@ window.BetterTypora.commands.execute('tabs:create-untitled');
 | `default` | any | 默认值 (未持久化时使用) |
 | `desc` | string | 可选, 设置项下方的说明文字 |
 | `options` | array | `select` 类型必填, 下拉选项列表 |
+| `min` / `max` | number | 可选, `number` 类型输入框的上下限 |
 
 **交互链路**：面板中修改 → ipc 发回主文档 → `PluginManager.updateSetting`（持久化到 `.cache/` + 触发该插件全部 `onSettingChange` 回调）→ 插件实时应用。面板展开状态在数据推送重渲染后保持。
 
