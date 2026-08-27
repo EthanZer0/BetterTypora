@@ -137,6 +137,9 @@ BetterTypora.getMountFolder()    // → string | null  打开的工作区根目�
 BetterTypora.openFile(path)      // → 切换到指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 
+// 工具
+BetterTypora.escapeHtml(str)     // → 防 XSS 转义 (& < > ")
+
 // 文件事件 — 统一捕获 Typora 文件打开/切换/关闭/删除/改名/保存
 BetterTypora.onFileEvent(type, fn)   // → 订阅事件, 返回取消函数
 BetterTypora.offFileEvent(unsubFn)   // → 取消订阅
@@ -150,6 +153,60 @@ BetterTypora.settings            // SettingsManager 实例
 BetterTypora.hotkeys             // HotkeyManager 实例
 BetterTypora.manager             // PluginManager 实例
 BetterTypora.theme               // ThemeService 实例 (主题特征检测 + 切换事件)
+BetterTypora.markdown            // Markdown 渲染服务 (Typora 原生解析器, 见下)
+BetterTypora.scroll              // 滚动状态服务 (按文件记录 + 自动恢复, 见下)
+BetterTypora.plugins             // 插件注册表原始引用 (内部对象, 谨慎使用)
+
+// 定时器组 (BetterTypora.createTimerGroup())
+// 组内定时器可一次 close() 全部清理 — 插件生命周期终结防泄漏的标准做法
+BetterTypora.createTimerGroup()  // → {setTimeout, setInterval, setImmediate, delay, clearTimeout, clearInterval, clearAll, close, count, closed}
+```
+
+### Markdown 渲染服务 — `BetterTypora.markdown`
+
+复用 Typora 内部节点解析器（`parseFrom`），产出与编辑器**完全一致**的 HTML DOM。解析器不可用（Typora 升级变动）时 `parse`/`renderTo` 返回 `null`/`false`，调用方可降级到自有渲染器。
+
+```js
+BetterTypora.markdown.isAvailable()            // → bool  原生解析器是否可用
+BetterTypora.markdown.parse(md)                // → string | null  markdown → Typora 原生 HTML (含 front matter 处理)
+BetterTypora.markdown.renderTo(container, md, options)  // → bool  渲染到容器
+BetterTypora.markdown.lastError()              // → string | null  上次失败原因
+```
+
+`renderTo` 产出 `.bt-write-clone.write` 内容层（镜像编辑器 `#write`，主题规则自动生效），并完成：
+- **代码块高亮** — Typora 同款 CodeMirror（`pre.md-fences`），行号/换行跟随编辑器选项
+- **公式补渲染** — 块级公式源码态手动喂给 `MathJax.tex2svgPromise`（编辑器 `#write` 的补渲染不覆盖外部容器）
+- **图片/链接重映射** — `options.baseDir` 为相对路径解析基准，相对引用重映射到预览文档目录；本地链接标记 `data-bt-link`（绝对路径，点击行为由调用方委托）
+- 预览容器禁编辑（`contenteditable="false"`），移除 Typora 事件属性（`onerror`/`onload`）
+
+### 滚动状态服务 — `BetterTypora.scroll`
+
+按文件记录滚动位置，并安装自动恢复：包装 `File.recoverPosOrScroll`，在 Typora 恢复滚动时注入 `scrollOffset`（渲染未完成时 scrollHeight 不足会被 clamp，等待"可滚动到目标"条件成立后一次性补设）。
+
+```js
+BetterTypora.scroll.record(filePath, scrollTop) // → 记录某文件的滚动位置 (调用方监听滚动后调用)
+BetterTypora.scroll.get(filePath)               // → number | undefined
+BetterTypora.scroll.clear()                     // → 清空全部记录 (停止注入, Typora 恢复原行为)
+BetterTypora.scroll.installAutoRestore()        // → 安装自动恢复 (幂等)
+BetterTypora.scroll.isInstalled()               // → bool
+```
+
+### 定时器组 — `BetterTypora.createTimerGroup()`
+
+组内定时器可一次 `close()` 全部清理——插件生命周期终结防泄漏的标准做法（各插件 `disable`/`onUnload` 均基于此）。
+
+```js
+var timers = BetterTypora.createTimerGroup();
+timers.setTimeout(fn, 1000)       // → id (组关闭后返回 -1)
+timers.setInterval(fn, 5000)      // → id
+timers.setImmediate(fn)           // = setTimeout(fn, 0)
+timers.delay(ms)                  // → Promise (可 await)
+timers.clearTimeout(id)
+timers.clearInterval(id)
+timers.clearAll()                 // → 清理全部 (不关闭)
+timers.close()                    // → 关闭 + 全部清理 (此后 set 返回 -1)
+timers.count                      // → 存活定时器数
+timers.closed                     // → bool
 ```
 
 ### ThemeService — 主题特征检测
@@ -246,6 +303,12 @@ var BT = require("bettertypora:api");
 // BT.getMountFolder → function  返回打开的工作区根目录 (string | null)
 // BT.openFile       → function  切换到指定文件
 // BT.isDocumentEdited → function  返回当前文档是否有未保存更改 (bool)
+// BT.escapeHtml     → function  防 XSS 转义 (与 BetterTypora.escapeHtml 一致)
+// BT.onFileOpen     → function  订阅文件打开 (fn(filePath)), 返回取消函数
+// BT.offFileOpen    → function  取消订阅
+// BT.onFileEvent    → function  订阅通用文件事件 (同 BetterTypora.onFileEvent)
+// BT.offFileEvent   → function  取消订阅
+// BT.createTimerGroup → function  创建定时器组 (同 BetterTypora.createTimerGroup)
 ```
 
 ### PluginAPI
