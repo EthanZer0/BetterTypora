@@ -48,6 +48,9 @@ var tabStore = {
         // 去重: 相同路径的标签直接激活
         var existing = this.findByPath(filePath);
         if (existing) {
+            // 分屏排除的标签: 仅加载文件不切换激活 — 排除标签不可见,
+            // 激活会导致高亮落空 (split-view 用 visual-activate 管理高亮)
+            if (isExcluded(filePath)) return existing.id;
             this.activateTab(existing.id);
             return existing.id;
         }
@@ -1647,6 +1650,19 @@ module.exports = {
                 .filter(function (t) { return !isExcluded(t.filePath); })
                 .map(function (t) { return t.filePath; });
         }, "获取可见标签路径列表 (排除分屏标签)");
+
+        api.registerCommand("visual-activate", function (filePath) {
+            if (!filePath) return false;
+            for (var i = 0; i < tabStore.tabs.length; i++) {
+                if (tabStore.tabs[i].filePath === filePath &&
+                    !isExcluded(tabStore.tabs[i].filePath)) {
+                    tabStore.activateTab(tabStore.tabs[i].id);
+                    tabBarUI.render();
+                    return true;
+                }
+            }
+            return false;
+        }, "纯视觉激活标签 (不切换 Typora 当前文件, split-view 协作)");
 
         logger.log("标签页插件已启用 ✅ (" + tabStore.tabs.length + " 个标签)");
     },

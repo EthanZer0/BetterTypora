@@ -629,17 +629,31 @@ function sendToRight(filePath) {
     if (!filePath) return false;
 
     if (findRightTab(filePath) < 0) {
-        // 左栏预览 = 发送文件的邻近可见标签 (右优先, 无则左)
+        // 左栏预览 = 发送文件的邻近可见标签 (右优先, 无则左);
+        // 同步左栏标签栏高亮 (纯视觉, 不切 Typora 当前文件 —
+        // set-excluded 只在排除激活标签时自动激活邻近)
         try {
             var visible = tabsCmd("get-visible-paths") || [];
             var vi = visible.indexOf(filePath);
             var neighbor = visible[vi + 1] || visible[vi - 1] || null;
-            if (neighbor && findRightTab(neighbor) < 0) _leftPreviewPath = neighbor;
+            if (neighbor && findRightTab(neighbor) < 0) {
+                _leftPreviewPath = neighbor;
+                try { tabsCmd("visual-activate", neighbor); } catch (e) {}
+            }
         } catch (e) {}
         addRightTab(filePath);
         tabsCmd("set-excluded", filePath, true);
     }
-    setActiveSide("right");
+    if (_activeSide === "right") {
+        // 焦点已在右栏 (左栏是预览): setActiveSide 不会迁移 —
+        // 左栏预览刷新为邻近标签, 同时右栏编辑器打开新激活标签
+        // (addRightTab 只切换 tabs 高亮, 不切换编辑器文件)
+        var act = _rightTabs[_rightActive].path;
+        if (act && act !== BetterTypora.getCurrentFile()) BetterTypora.openFile(act);
+        syncPanes();
+    } else {
+        setActiveSide("right");
+    }
     return true;
 }
 
@@ -657,7 +671,15 @@ function sendToLeft(idx) {
         disable();
         return;
     }
-    setActiveSide("left");
+    if (_activeSide === "left") {
+        // 焦点已在左栏 (右栏是预览): setActiveSide 不会迁移 —
+        // 左栏编辑器打开发送的文件 (对称 sendToRight 的右栏分支),
+        // 右栏预览刷新为邻近标签
+        if (fp && fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
+        syncPanes();
+    } else {
+        setActiveSide("left");
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -689,6 +711,10 @@ function syncPanes() {
         renderPreviewInto(_els.leftContent, _leftPreviewPath);
         _els.rightContent.innerHTML = "";
         restorePreviewScroll(_els.leftContent, _leftPreviewPath);
+        // 左栏标签栏高亮同步到预览文件 (纯视觉, 不切 Typora 当前文件)
+        if (_leftPreviewPath) {
+            try { tabsCmd("visual-activate", _leftPreviewPath); } catch (e) {}
+        }
     }
 }
 
@@ -880,6 +906,14 @@ function onFileOpened(data) {
             // 左栏标签/外部切换 → 编辑器回左栏 (Typora 已切, 不重复 openFile)
             _leftPreviewPath = fp;
             doActivate("left");
+        }
+        // openFile 触发 tabs 插件 addOrActivate 激活被排除的发送文件
+        // (不可见) — 覆盖左栏预览邻近标签的高亮; 打开完成后重新同步
+        if (_leftPreviewPath) {
+            setTimeout(function () {
+                if (!_active || _activeSide !== "right") return;
+                try { tabsCmd("visual-activate", _leftPreviewPath); } catch (e) {}
+            }, 100);
         }
     }
 
