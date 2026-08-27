@@ -37,4 +37,4 @@
 
 ## 许可
 
-待定（开源后确定）。
+[MIT License](LICENSE) — Copyright (c) 2026 BetterTypora contributors
