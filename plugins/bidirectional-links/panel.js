@@ -268,11 +268,22 @@
         }
         var sources = Object.keys(grouped);
 
+        var GRAPH_ICON_SVG =
+            '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" ' +
+            'style="vertical-align:-2px">' +
+            '<line x1="3.5" y1="3.5" x2="11.5" y2="6.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+            '<line x1="11.5" y1="6.5" x2="5.5" y2="11.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+            '<line x1="5.5" y1="11.5" x2="3.5" y2="3.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+            '<circle cx="3.5" cy="3.5" r="1.8" fill="currentColor"/>' +
+            '<circle cx="11.5" cy="6.5" r="1.8" fill="currentColor"/>' +
+            '<circle cx="5.5" cy="11.5" r="1.8" fill="currentColor"/>' +
+            '</svg>';
+
         var html = '<div class="backlinks-header">' +
             '<span class="backlinks-title">🔗 反链</span>' +
             '<span class="backlinks-count">' + sources.length + ' 条结果</span>' +
             '<span style="flex:1"></span>' +
-            '<button class="backlinks-graph-btn" title="打开知识图谱 (Ctrl+Shift+G)">🕸️</button>' +
+            '<button class="backlinks-graph-btn" title="打开知识图谱 (Ctrl+Shift+G)">' + GRAPH_ICON_SVG + '</button>' +
             '</div>' +
             '<div class="backlinks-section">' +
             '<div class="backlinks-section-header">引用 (' + sources.length + ')</div>';

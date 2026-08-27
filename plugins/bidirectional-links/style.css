@@ -74,7 +74,7 @@
 .backlinks-header {
     padding: 10px 16px 6px;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
     border-bottom: 1px solid var(--window-border, rgba(128,128,128,0.18));
 }
@@ -552,11 +552,14 @@
     border: 1px solid var(--window-border, rgba(128,128,128,0.22));
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
-    padding: 1px 8px;
+    padding: 3px 8px;
     opacity: 0.55;
     transition: opacity 0.15s, background 0.15s;
-    line-height: 1.4;
+    /* 图标在按钮内 flex 居中 (header 已 center 对齐, 无需 align-self) */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
 }
 .backlinks-graph-btn:hover {
     opacity: 1;
