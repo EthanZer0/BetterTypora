@@ -22,7 +22,7 @@
 
 **3. 重启 Typora** — 插件系统自动启动。
 
-> `window.html` 是 `resources/` 下的普通 HTML 文件，可以直接编辑。**不需要**解包 `app.asar`、**不需要**修改 `launch.dist.js`——正版 Typora 无需任何逆向操作即可使用。
+> `window.html` 是 `resources/` 下的普通 HTML 文件，可以直接编辑。
 
 ### 你的第一个插件
 
@@ -105,7 +105,7 @@ window.html ── 渲染进程入口 (Typora 自带, 仅添加一行注入)
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| 注入点 | `window.html` 末尾一行 `<script>` | window.html 是 resources/ 下的明文文件，无需解包 app.asar、无需修改 launch.dist.js，正版 Typora 直接可用 |
+| 注入点 | `window.html` 末尾一行 `<script>` | window.html 是 resources/ 下的明文文件，直接添加一行 script 即可 |
 | 插件目录 | `resources/plugins/` | 独立于 Typora 本体文件，升级 Typora 时插件及其数据不受影响 |
 | API 传递 | `require("bettertypora:api")` | 虚拟模块注入，干净无全局变量污染 |
 | 加载时机 | body 末尾同步执行 + `setTimeout(fn, 0)` | `frame.js` 是 `defer`，注入脚本在解析时先执行；插件加载推迟一 tick，确保 Typora 初始化完毕 |
@@ -120,7 +120,7 @@ window.html ── 渲染进程入口 (Typora 自带, 仅添加一行注入)
 
 ```js
 // 插件状态
-BetterTypora.status()            // → [{id, name, version, state, description}, ...]
+BetterTypora.status()            // → [{id, name, version, state, description, settingsSchema, settings}, ...]
 BetterTypora.listPlugins()       // → ["hello-world", "my-plugin"]
 
 // 插件管理
@@ -467,7 +467,7 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 
 ## 许可
 
-BetterTypora 是开源项目，可自由使用和修改。
+BetterTypora 是开源项目，可自由使用和修改。许可证见仓库主页。
 
 ---
 

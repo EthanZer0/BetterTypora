@@ -24,3 +24,6 @@ ehthumbs.db
 # === node_modules (依赖由 package.json 记录, 部署时 npm install) ===
 node_modules/
 plugins/*/node_modules/
+
+# === 本地开发工具配置 ===
+.claude/
