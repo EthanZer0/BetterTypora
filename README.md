@@ -3,6 +3,14 @@
 </p>
 <h1 align="center">BetterTypora</h1>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-v1.0.0-4c1.svg" alt="Version: v1.0.0">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/language-JavaScript-yellow.svg" alt="Language: JavaScript">
+  <img src="https://img.shields.io/badge/platform-Windows-0078d6.svg" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/plugins-7-green.svg" alt="Plugins: 7">
+</p>
+
 为 Typora 打造的开源插件系统。通过在 `resources/window.html` 注入一行脚本启用，即可为 Typora 带来多标签页、分屏、双向链接、知识图谱、内存优化等能力。
 
 ## 特性
