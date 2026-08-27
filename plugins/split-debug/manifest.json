@@ -1,9 +1,0 @@
-{
-  "id": "split-debug",
-  "name": "Split Debug",
-  "version": "0.6.0",
-  "description": "滚动恢复诊断: 滚动容器定位 + 恢复时序观测 (用完即删)",
-  "author": "BetterTypora",
-  "main": "main.js",
-  "enabled": true
-}
