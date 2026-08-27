@@ -519,12 +519,15 @@ var tabBarUI = {
                     drag.barLeft = barRect.left + 4;
                     drag.barRight = barRect.right - 4;
 
-                    // 快照所有芯片初始位置 (用于 insertIndex 稳定性)
+                    // 快照所有芯片初始位置 (按 data-tab-index 存 — 分屏
+                    // 排除的标签不渲染, DOM 顺序与数据索引有空洞, 用
+                    // DOM 顺序索引会错位 → 拖拽目标"固定死")
                     var allChips = self.barEl.querySelectorAll(".typora-tab-chip");
                     drag.snapshot = [];
                     for (var ci = 0; ci < allChips.length; ci++) {
                         var cr = allChips[ci].getBoundingClientRect();
-                        drag.snapshot.push({ left: cr.left, width: cr.width });
+                        var ciData = parseInt(allChips[ci].getAttribute("data-tab-index"), 10);
+                        drag.snapshot[ciData] = { left: cr.left, width: cr.width };
                     }
                 });
             })(tab.id, i);
@@ -582,17 +585,22 @@ var tabBarUI = {
             var newInsert = drag.fromIndex;
             var found = false;
             for (var j = 0; j < chips.length; j++) {
-                if (j === drag.fromIndex) continue;
-                var snapMid = drag.snapshot[j].left + drag.snapshot[j].width / 2;
+                var jData = parseInt(chips[j].getAttribute("data-tab-index"), 10);
+                if (jData === drag.fromIndex) continue;
+                var snapMid = drag.snapshot[jData].left + drag.snapshot[jData].width / 2;
                 if (chipCompareX < snapMid) {
-                    newInsert = parseInt(chips[j].getAttribute("data-tab-index"), 10);
+                    newInsert = jData;
                     found = true;
                     break;
                 }
             }
-            // 所有非拖拽芯片都在 clampedX 左侧 → 插入到末尾
+            // 所有非拖拽芯片都在 clampedX 左侧 → 插入到末尾 (最后一个
+            // 可见 chip 的数据索引 + 1, 排除空洞时不能用 chips.length)
             if (!found) {
-                newInsert = chips.length;
+                var lastData = chips.length
+                    ? parseInt(chips[chips.length - 1].getAttribute("data-tab-index"), 10)
+                    : -1;
+                newInsert = lastData + 1;
             }
 
             if (newInsert !== drag.insertIndex) {

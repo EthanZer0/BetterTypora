@@ -195,7 +195,11 @@
      * 会改变 fixed 定位基准导致贴片错位 */
     transform: none !important;
 }
-.bt-editor-fixed * {
+/* 编辑器贴片内容禁动画 — 排除标签栏区域: tabs 标签栏注入在 content
+   内, 分屏时 * 规则会误伤标签栏芯片的拖拽让位/落地缓动 (transition
+   none !important 使 chips 过渡失效); :not 排除后标签栏自然恢复
+   (yielding 规则正常生效, JS 拖拽的内联 transition 控制也不被干扰) */
+.bt-editor-fixed *:not(#typora-tab-bar):not(#typora-tab-bar *) {
     transition: none !important;
     animation: none !important;
 }
