@@ -103,8 +103,12 @@
     font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
     font-size: 12px;
     box-sizing: border-box;
-    border-bottom: 1px solid var(--window-border, #ddd);
+    /* 毛玻璃 (与主标签栏一致): 半透明主题背景 + blur */
     background: var(--side-bar-bg-color, var(--bg-color));
+    background: color-mix(in srgb, var(--side-bar-bg-color, var(--bg-color)) 78%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
+    border-bottom: 1px solid color-mix(in srgb, var(--window-border, #ddd) 55%, transparent);
 }
 #bt-split-container .bt-split-tabs::-webkit-scrollbar {
     height: 2px;

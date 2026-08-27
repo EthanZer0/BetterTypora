@@ -11,8 +11,13 @@
     z-index: 10;
     display: flex;
     align-items: center;
+    /* 毛玻璃: 半透明主题背景 + blur — 内容滚动时背景通透 (fallback
+       为不透明主题色, 旧 Chromium 无 color-mix) */
     background: var(--bg-color, #fafafa);
-    border-bottom: 1px solid var(--window-border, #ddd);
+    background: color-mix(in srgb, var(--bg-color, #fafafa) 78%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
+    border-bottom: 1px solid color-mix(in srgb, var(--window-border, #ddd) 55%, transparent);
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -49,7 +54,9 @@
     border-radius: 4px;
     cursor: pointer;
     color: var(--text-color, #555);
-    background: var(--side-bar-bg-color, var(--bg-color));  /* 从侧边栏颜色取底色, 保证可见 */
+    /* 毛玻璃芯片: 半透明底, 透出标签栏模糊内容 (fallback 不透明) */
+    background: var(--side-bar-bg-color, var(--bg-color));
+    background: color-mix(in srgb, var(--side-bar-bg-color, var(--bg-color)) 55%, transparent);
     border: 1px solid transparent;
     user-select: none;
     max-width: 200px;
@@ -67,13 +74,14 @@ body.unibody-window .typora-tab-chip:not(.active) {
 }
 
 .typora-tab-chip:hover {
-    background: var(--item-hover-bg-color, rgba(128,128,128,0.12));
+    background: color-mix(in srgb, var(--item-hover-bg-color, rgba(128,128,128,0.12)) 85%, transparent);
     color: var(--heading-text-color, var(--text-color, #333));
 }
 
 /* 激活标签 — 顶线强调，一体化 (unibody) 改用底线避免标题栏遮挡 */
 .typora-tab-chip.active {
     background: var(--bg-color, #fafafa);
+    background: color-mix(in srgb, var(--bg-color, #fafafa) 68%, transparent);
     border-color: transparent;
     border-top: 2px solid var(--active-border-color, #4a90d9);
     font-weight: 600;
@@ -109,30 +117,35 @@ body.unibody-window .typora-tab-chip.active {
 }
 
 /* ===================================================================
- * 关闭按钮
+ * 关闭按钮 — hover 针对叉叉本身 (放大/旋转/变色), 无背景方块
  * =================================================================== */
 .typora-tab-close {
     margin-left: 8px;
     width: 16px;
     height: 16px;
-    line-height: 14px;
-    text-align: center;
-    border-radius: 3px;
+    /* × 精确居中 (flex 替代 line-height 基线排版, 后者字符偏上;
+       放大 transform 围绕盒中心, 偏移会被放大) */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 14px;
     font-weight: 400;
     color: var(--text-color, #555);
     opacity: 0;
-    transition: opacity 0.12s ease;
+    transition: opacity 0.12s ease, transform 0.15s ease, color 0.15s ease, font-weight 0.15s ease;
     flex-shrink: 0;
 }
 
 .typora-tab-chip:hover .typora-tab-close {
-    opacity: 0.5;
+    opacity: 0.6;
 }
 
+/* hover: 叉叉本身 — 放大 + 强调色 + 加粗 (无旋转, 无背景方块) */
 .typora-tab-close:hover {
     opacity: 1 !important;
-    background: rgba(128,128,128,0.2);
+    color: var(--active-border-color, #E84020);
+    transform: scale(1.3);
+    font-weight: 700;
 }
 
 /* 确保关闭按钮不可选中 */
