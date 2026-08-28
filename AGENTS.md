@@ -43,6 +43,6 @@ AGENTS.md                    # this file
 
 ## Commit Conventions
 
-- Conventional commits: `feat:` / `fix:` / `style:` / `docs:` / `chore:`, with **Chinese descriptions** (this repo's convention).
+- Conventional commits: `feat:` / `fix:` / `style:` / `docs:` / `chore:`.
 - Split logically independent changes into separate commits; never commit test files or local assets.
 - Code changes must be deployed and verified by the user (restart Typora) before committing.
