@@ -4,6 +4,10 @@
 <h1 align="center">BetterTypora</h1>
 
 <p align="center">
+  <b>简体中文</b> | <a href="README_en.md">English</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/version-v1.0.0-4c1?style=for-the-badge&logo=semver&logoColor=white" alt="v1.0.0">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT">
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript">
