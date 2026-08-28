@@ -300,6 +300,9 @@ body.unibody-window .bt-tabbar-floating {
 .bt-split-diff-row.is-modified { background: color-mix(in srgb, var(--active-file-text-color, #468) 9%, transparent); }
 .bt-split-diff-row.is-current-change { box-shadow: inset 3px 0 0 var(--active-file-text-color, #468); }
 .bt-split-diff-row.is-current-change .bt-split-diff-line-number { color: var(--text-color, #333); font-weight: 600; }
+.bt-split-diff-row.is-fold { display: block; border-top: 1px solid color-mix(in srgb, var(--window-border, #ddd) 54%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--window-border, #ddd) 54%, transparent); background: color-mix(in srgb, var(--control-hover-bg-color, rgba(127,127,127,.1)) 65%, transparent); }
+.bt-split-diff-fold-button { display: block; width: 100%; height: 20px; padding: 0 12px; border: 0; background: transparent; color: var(--secondary-text-color, var(--text-color, #777)); cursor: pointer; font: 11px/20px var(--font-sans, system-ui, -apple-system, sans-serif); letter-spacing: .01em; text-align: center; transition: background-color .15s ease, color .15s ease; }
+.bt-split-diff-fold-button:hover { background: var(--control-hover-bg-color, rgba(127,127,127,.14)); color: var(--text-color, #333); }
 @media (max-width: 620px) {
     .bt-split-diff-pane { min-width: 180px; }
     .bt-split-diff-line-number { padding-right: 6px; }

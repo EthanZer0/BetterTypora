@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "左右分屏插件 — Typora 解析器渲染预览的降级渲染器依赖",
+  "scripts": {
+    "test": "node tests/diff-session.test.js"
+  },
   "dependencies": {
     "marked": "^18.0.11"
   }

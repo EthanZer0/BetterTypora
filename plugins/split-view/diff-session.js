@@ -149,6 +149,85 @@
         return rows;
     }
 
+    /*
+     * 将长的未变化区间收起为一行占位。完整行模型仍保留在内存中，
+     * 因此展开后行号和导航目标不会重新计算或产生跳变。
+     */
+    function foldRows(rows, contextLines, expandedRanges) {
+        var context = typeof contextLines === "number" ? contextLines : 3;
+        var minimum = context * 2 + 1;
+        var keep = [];
+        var ranges = expandedRanges || [];
+        var i;
+        var hasChange = false;
+        for (i = 0; i < rows.length; i++) keep[i] = false;
+        for (i = 0; i < rows.length; i++) {
+            if (!rows[i].change) continue;
+            hasChange = true;
+            var start = Math.max(0, i - context);
+            var end = Math.min(rows.length - 1, i + context);
+            for (var j = start; j <= end; j++) keep[j] = true;
+        }
+        // 没有文本改动时保留原样，避免把“无差异”误显示为一条折叠占位。
+        if (!hasChange) {
+            var unchanged = [];
+            for (i = 0; i < rows.length; i++) unchanged.push(copyRow(rows[i], i));
+            return unchanged;
+        }
+        for (i = 0; i < ranges.length; i++) {
+            var range = ranges[i];
+            var rangeStart = Math.max(0, range.start || 0);
+            var rangeEnd = Math.min(rows.length - 1, range.end == null ? rows.length - 1 : range.end);
+            for (var k = rangeStart; k <= rangeEnd; k++) keep[k] = true;
+        }
+
+        var visible = [];
+        i = 0;
+        while (i < rows.length) {
+            if (keep[i]) {
+                visible.push(copyRow(rows[i], i));
+                i++;
+                continue;
+            }
+            var hiddenStart = i;
+            while (i < rows.length && !keep[i]) i++;
+            var hiddenEnd = i - 1;
+            if (hiddenEnd - hiddenStart + 1 < minimum) {
+                for (var m = hiddenStart; m <= hiddenEnd; m++) visible.push(copyRow(rows[m], m));
+                continue;
+            }
+            visible.push(makeFoldRow(rows, hiddenStart, hiddenEnd));
+        }
+        return visible;
+    }
+
+    function copyRow(row, sourceRow) {
+        return { left: row.left, right: row.right, change: row.change, sourceRow: sourceRow };
+    }
+
+    function makeFoldRow(rows, start, end) {
+        return {
+            fold: true,
+            change: false,
+            sourceStart: start,
+            sourceEnd: end,
+            hiddenCount: end - start + 1,
+            left: blank("fold"),
+            right: blank("fold")
+        };
+    }
+
+    function foldLabel(row, rows, side) {
+        var start = row.sourceStart;
+        var end = row.sourceEnd;
+        var first = rows[start] || null;
+        var last = rows[end] || null;
+        var firstNumber = first && first[side] ? first[side].number : null;
+        var lastNumber = last && last[side] ? last[side].number : null;
+        var range = firstNumber === null || lastNumber === null ? "" : "（" + firstNumber + "–" + lastNumber + "）";
+        return "展开 " + row.hiddenCount + " 行未变化内容" + range;
+    }
+
     function fileName(filePath) {
         var value = String(filePath || "").replace(/\\/g, "/");
         var index = value.lastIndexOf("/");
@@ -161,9 +240,13 @@
         this.el = null;
         this.left = null;
         this.right = null;
+        this.allRows = [];
         this.rows = [];
         this.changeRows = [];
+        this.expandedRanges = [];
+        this.contextLines = 3;
         this.changeIndex = -1;
+        this.activeSourceRow = null;
         this._syncing = false;
         this._keydown = null;
         this._dividerDown = null;
@@ -175,19 +258,20 @@
 
     DiffSession.prototype.open = function (model) {
         this.close(false);
-        this.rows = buildRows(model.beforeText, model.afterText, model.patch);
-        this.changeRows = [];
-        for (var i = 0; i < this.rows.length; i++) if (this.rows[i].change) this.changeRows.push(i);
+        this.allRows = buildRows(model.beforeText, model.afterText, model.patch);
+        this.rows = [];
+        this.expandedRanges = [];
 
         var root = document.createElement("div");
         root.className = "bt-split-diff-session";
         root.innerHTML =
             '<div class="bt-split-diff-toolbar">' +
             '  <div class="bt-split-diff-title"><span class="bt-split-diff-glyph">↔</span><span title="' + escapeHtml(model.path) + '">' + escapeHtml(fileName(model.path)) + '</span></div>' +
-            '  <div class="bt-split-diff-summary">' + this.changeRows.length + ' 处改动</div>' +
+            '  <div class="bt-split-diff-summary"></div>' +
             '  <div class="bt-split-diff-actions">' +
             '    <button type="button" data-action="prev" title="上一个改动">↑</button>' +
             '    <button type="button" data-action="next" title="下一个改动">↓</button>' +
+            '    <button type="button" data-action="show-all" title="显示全部未变化内容">≡</button>' +
             '    <button type="button" data-action="close" title="关闭差异视图">×</button>' +
             "  </div>" +
             "</div>" +
@@ -200,20 +284,36 @@
         this.el = root;
         this.left = root.querySelector(".bt-split-diff-left");
         this.right = root.querySelector(".bt-split-diff-right");
-        this.renderPane(this.left, "left");
-        this.renderPane(this.right, "right");
+        this.rebuildRows();
         this.bind();
         if (this.changeRows.length) this.goTo(0);
         return true;
     };
 
     DiffSession.prototype.renderPane = function (container, side) {
+        container.textContent = "";
         var fragment = document.createDocumentFragment();
         for (var i = 0; i < this.rows.length; i++) {
-            var line = this.rows[i][side];
             var row = document.createElement("div");
-            row.className = "bt-split-diff-row is-" + line.kind + (this.rows[i].change ? " is-change" : "");
+            var source = this.rows[i];
+            var line = source[side];
+            if (source.fold) {
+                row.className = "bt-split-diff-row is-fold";
+                row.setAttribute("data-row", String(i));
+                var expand = document.createElement("button");
+                expand.type = "button";
+                expand.className = "bt-split-diff-fold-button";
+                expand.setAttribute("data-action", "expand");
+                expand.setAttribute("data-start", String(source.sourceStart));
+                expand.setAttribute("data-end", String(source.sourceEnd));
+                expand.textContent = foldLabel(source, this.allRows, side);
+                row.appendChild(expand);
+                fragment.appendChild(row);
+                continue;
+            }
+            row.className = "bt-split-diff-row is-" + line.kind + (source.change ? " is-change" : "");
             row.setAttribute("data-row", String(i));
+            row.setAttribute("data-source-row", String(source.sourceRow));
             var number = document.createElement("span");
             number.className = "bt-split-diff-line-number";
             number.textContent = line.number === null ? "" : String(line.number);
@@ -225,6 +325,67 @@
             fragment.appendChild(row);
         }
         container.appendChild(fragment);
+    };
+
+    DiffSession.prototype.rebuildRows = function () {
+        this.rows = foldRows(this.allRows, this.contextLines, this.expandedRanges);
+        this.changeRows = [];
+        for (var i = 0; i < this.rows.length; i++) if (this.rows[i].change) this.changeRows.push(i);
+        if (this.el) {
+            this.renderPane(this.left, "left");
+            this.renderPane(this.right, "right");
+            this.updateSummary();
+            this.restoreActiveChange();
+        }
+    };
+
+    DiffSession.prototype.restoreActiveChange = function () {
+        if (this.activeSourceRow === null) return;
+        for (var i = 0; i < this.changeRows.length; i++) {
+            var rowIndex = this.changeRows[i];
+            if (this.rows[rowIndex].sourceRow !== this.activeSourceRow) continue;
+            this.changeIndex = i;
+            this.setActive(rowIndex, true);
+            return;
+        }
+        this.activeSourceRow = null;
+        this.changeIndex = -1;
+    };
+
+    DiffSession.prototype.updateSummary = function () {
+        if (!this.el) return;
+        var summary = this.el.querySelector(".bt-split-diff-summary");
+        if (!summary) return;
+        var hidden = 0;
+        for (var i = 0; i < this.rows.length; i++) if (this.rows[i].fold) hidden += this.rows[i].hiddenCount;
+        summary.textContent = this.changeRows.length + " 处改动" + (hidden ? " · 已折叠 " + hidden + " 行" : "");
+    };
+
+    DiffSession.prototype.expandRange = function (start, end) {
+        if (isNaN(start) || isNaN(end)) return;
+        var scrollTop = this.left ? this.left.scrollTop : 0;
+        this.expandedRanges.push({ start: start, end: end });
+        this.rebuildRows();
+        var target = this.left ? this.left.querySelector('[data-source-row="' + start + '"]') : null;
+        if (target) {
+            var top = Math.max(0, target.offsetTop - 22);
+            this.left.scrollTop = top;
+            this.right.scrollTop = top;
+        } else if (this.left) {
+            this.left.scrollTop = scrollTop;
+            this.right.scrollTop = scrollTop;
+        }
+    };
+
+    DiffSession.prototype.showAll = function () {
+        if (this.expandedRanges.length === 1 && this.expandedRanges[0].start === 0 && this.expandedRanges[0].end === this.allRows.length - 1) return;
+        var scrollTop = this.left ? this.left.scrollTop : 0;
+        this.expandedRanges = [{ start: 0, end: this.allRows.length - 1 }];
+        this.rebuildRows();
+        if (this.left) {
+            this.left.scrollTop = scrollTop;
+            this.right.scrollTop = scrollTop;
+        }
     };
 
     DiffSession.prototype.bind = function () {
@@ -239,6 +400,8 @@
             if (action === "close") self.close();
             else if (action === "prev") self.goTo(self.changeIndex - 1);
             else if (action === "next") self.goTo(self.changeIndex + 1);
+            else if (action === "show-all") self.showAll();
+            else if (action === "expand") self.expandRange(parseInt(target.getAttribute("data-start"), 10), parseInt(target.getAttribute("data-end"), 10));
         });
         this._keydown = function (event) {
             if (!self.el) return;
@@ -272,6 +435,7 @@
         if (old !== undefined) this.setActive(old, false);
         this.changeIndex = index;
         var rowIndex = this.changeRows[index];
+        this.activeSourceRow = this.rows[rowIndex].sourceRow;
         this.setActive(rowIndex, true);
         var target = this.left.querySelector('[data-row="' + rowIndex + '"]');
         if (target) {
@@ -321,15 +485,19 @@
         this.el = null;
         this.left = null;
         this.right = null;
+        this.allRows = [];
         this.rows = [];
         this.changeRows = [];
+        this.expandedRanges = [];
         this.changeIndex = -1;
+        this.activeSourceRow = null;
         this._keydown = null;
         this._dividerDown = null;
         if (notify !== false) this.onClose();
     };
 
     DiffSession.buildRows = buildRows;
+    DiffSession.foldRows = foldRows;
     DiffSession.parseHunks = parseHunks;
     if (typeof module !== "undefined") module.exports = DiffSession;
 })();
