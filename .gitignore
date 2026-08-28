@@ -27,3 +27,6 @@ plugins/*/node_modules/
 
 # === 本地开发工具配置 ===
 .claude/
+
+# === 发布构建产物 ===
+BetterTypora-*.zip
