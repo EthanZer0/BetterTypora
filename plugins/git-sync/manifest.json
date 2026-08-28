@@ -1,26 +1,54 @@
 {
   "id": "git-sync",
   "name": "Git 同步",
-  "version": "2.0.0",
-  "description": "手动同步笔记到 Git 仓库，支持本地版本控制和远程备份",
+  "version": "3.0.0",
+  "description": "为 Typora 笔记提供安全的本地快照与 Git 远程同步",
   "author": "BetterTypora",
+  "license": "MIT",
   "main": "main.js",
   "style": "style.css",
   "enabled": true,
   "hotkeys": [
-    { "command": "git-sync:toggle-panel",   "key": "Ctrl+Shift+V", "when": "always" },
-    { "command": "git-sync:quick-commit",   "key": "Ctrl+Shift+S", "when": "editorFocus" },
-    { "command": "git-sync:show-diff-current", "key": "Ctrl+Shift+D", "when": "editorFocus" }
+    { "command": "git-sync:toggle-panel", "key": "Ctrl+Shift+V", "when": "always" },
+    { "command": "git-sync:save-snapshot", "key": "Ctrl+Shift+S", "when": "editorFocus" },
+    { "command": "git-sync:sync", "key": "Ctrl+Shift+Y", "when": "always" }
   ],
   "settings": {
-    "remoteEnabled": false,
+    "repoPath": "",
     "remoteName": "origin",
-    "remoteURL": "",
-    "diffViewMode": "unified",
-    "maxHistoryCount": 50,
-    "pollIntervalMs": 5000,
-    "ignorePatterns": [".DS_Store", "*.tmp", "*.bak"],
-    "toolbarPosition": { "top": 120, "right": 8 },
-    "toolbarCollapsed": false
-  }
+    "autoFetchOnOpen": false,
+    "maxStatusFiles": 80
+  },
+  "settingsSchema": [
+    {
+      "key": "repoPath",
+      "label": "笔记仓库路径",
+      "type": "text",
+      "default": "",
+      "desc": "留空时使用 Typora 当前工作区；填写后仅使用该目录，不会自动扫描其他目录"
+    },
+    {
+      "key": "remoteName",
+      "label": "远程名称",
+      "type": "text",
+      "default": "origin",
+      "desc": "通常为 origin；凭证由 SSH 或系统 Git 凭证管理器提供"
+    },
+    {
+      "key": "autoFetchOnOpen",
+      "label": "打开文档时检查远程",
+      "type": "boolean",
+      "default": false,
+      "desc": "只获取远程状态，不自动合并或覆盖本地内容"
+    },
+    {
+      "key": "maxStatusFiles",
+      "label": "最多显示改动文件数",
+      "type": "number",
+      "default": 80,
+      "min": 10,
+      "max": 500,
+      "desc": "状态面板中展示的文件数量"
+    }
+  ]
 }

@@ -302,6 +302,7 @@ var BT = require("bettertypora:api");
 // BT.logger         → logger with [plugin-id] prefix {log, warn, error}
 // BT.pluginDir      → absolute path of the plugin directory
 // BT.saveFile       → function  trigger save of the current document
+// BT.saveFileAndWait → function  trigger save and wait for completion (Promise)
 // BT.getCurrentFile → function  current file path (string | null)
 // BT.getMountFolder → function  opened workspace root (string | null)
 // BT.openFile       → function  switch to the given file

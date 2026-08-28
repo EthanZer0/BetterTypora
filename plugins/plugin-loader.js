@@ -588,6 +588,7 @@
         var apiInjected = { api: api, manifest: manifest, logger: logger, pluginDir: dirPath,
             // File APIs — 从 window.BetterTypora 引用，确保与全局对象一致
             saveFile: window.BetterTypora.saveFile,
+            saveFileAndWait: window.BetterTypora.saveFileAndWait,
             getCurrentFile: window.BetterTypora.getCurrentFile,
             getMountFolder: window.BetterTypora.getMountFolder,
             openFile: window.BetterTypora.openFile,
@@ -1432,6 +1433,59 @@
             }
         };
 
+        /**
+         * 触发保存并等待保存完成。
+         *
+         * 大文档写盘耗时会随磁盘和文件大小变化，固定延时可能过早读取；
+         * 这里以 saved 事件为主，超时只作为旧版 Typora 的兜底，避免 Promise
+         * 永不结束。
+         */
+        var _btSaveFileAndWait = function (timeout) {
+            timeout = typeof timeout === "number" && timeout > 0 ? timeout : 10000;
+            var beforePath = _btGetCurrentFile();
+            var beforeEdited = false;
+            try { beforeEdited = _btIsDocumentEdited(); } catch (e) {}
+            var startedAt = Date.now();
+            return new Promise(function (resolve) {
+                var settled = false;
+                var unsubscribe = null;
+                var timer = null;
+
+                function finish(ok, reason) {
+                    if (settled) return;
+                    settled = true;
+                    if (unsubscribe) unsubscribe();
+                    if (timer) clearTimeout(timer);
+                    resolve({
+                        success: ok,
+                        path: _btGetCurrentFile(),
+                        reason: reason || (ok ? "saved" : "timeout"),
+                        elapsed: Date.now() - startedAt
+                    });
+                }
+
+                if (!beforeEdited) {
+                    finish(true, "unchanged");
+                    return;
+                }
+
+                unsubscribe = _btOnFileEvent("saved", function (data) {
+                    var savedPath = data && data.path ? data.path : _btGetCurrentFile();
+                    if (!beforePath || !savedPath || savedPath === beforePath) {
+                        finish(true, "saved");
+                    }
+                });
+
+                timer = setTimeout(function () {
+                    var edited = false;
+                    try { edited = _btIsDocumentEdited(); } catch (e) {}
+                    finish(!edited, edited ? "timeout" : "unchanged");
+                }, timeout);
+
+                _btSaveFile();
+            });
+        };
+
         var _btGetCurrentFile = function () {
             try {
                 if (typeof File !== "undefined" && File.bundle && File.bundle.filePath) {
@@ -1604,22 +1658,23 @@
             for (var si = 0; si < saveNames.length; si++) {
                 var name = saveNames[si];
                 if (_fileHooks[name] || typeof saveTarget[name] !== "function") continue;
-                var origFn = saveTarget[name];
-                _fileHooks[name] = origFn;
-                saveTarget[name] = function () {
-                    var r = origFn.apply(this, arguments);
-                    try {
-                        if (r && typeof r.then === "function") {
-                            r.then(function () {
-                                try {
-                                    var p = (File && File.bundle && File.bundle.filePath) || null;
-                                    _emitFileEvent("saved", { path: p });
-                                } catch (e) {}
-                            });
-                        }
-                    } catch (e) {}
-                    return r;
-                };
+                (function (saveName, originalFn) {
+                    _fileHooks[saveName] = originalFn;
+                    saveTarget[saveName] = function () {
+                        var r = originalFn.apply(this, arguments);
+                        try {
+                            if (r && typeof r.then === "function") {
+                                r.then(function () {
+                                    try {
+                                        var p = (File && File.bundle && File.bundle.filePath) || null;
+                                        _emitFileEvent("saved", { path: p });
+                                    } catch (e) {}
+                                });
+                            }
+                        } catch (e) {}
+                        return r;
+                    };
+                })(name, saveTarget[name]);
                 systemLogger.log("已包装 " + name + " (保存完成事件)");
             }
         }
@@ -2232,6 +2287,7 @@
 
             // File APIs
             saveFile: _btSaveFile,
+            saveFileAndWait: _btSaveFileAndWait,
             getCurrentFile: _btGetCurrentFile,
             getMountFolder: _btGetMountFolder,
             openFile: _btOpenFile,
@@ -2245,7 +2301,7 @@
             offFileOpen: _btOffFileOpen,
 
             // 通用文件事件 (BetterTypora.onFileEvent(type, fn)/offFileEvent)
-            // type: "opening" | "opened" | "closing" | "deleted" | "renamed"
+            // type: "opening" | "opened" | "closing" | "deleted" | "renamed" | "saved"
             onFileEvent: _btOnFileEvent,
             offFileEvent: _btOffFileEvent,
 

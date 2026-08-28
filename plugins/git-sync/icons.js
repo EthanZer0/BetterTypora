@@ -1,100 +1,37 @@
-/**
- * Git Plugin — SVG 图标模块
- * =============================
- * Phosphor-style 16×16 SVG icons. Stroke-based, currentColor.
- * All icons: viewBox="0 0 16 16", fill="none", stroke="currentColor",
- *           stroke-width="1.5", stroke-linecap="round", stroke-linejoin="round"
- */
+/* Git 同步图标。主图标用双向同步环包围提交节点，颜色始终继承 Typora 当前主题。 */
 (function () {
     "use strict";
 
-    var SVG_ATTRS = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
-
-    var PATHS = {
-        // Git branch icon — forked path with nodes
-        git: '<circle cx="4.5" cy="4.5" r="2"/><circle cx="4.5" cy="11.5" r="2"/><circle cx="11.5" cy="6.5" r="2"/>' +
-             '<path d="M4.5 6.5v3"/><path d="M4.5 9.5C4.5 7.5 7 7 7 6.5"/><path d="M7 6.5h2.5"/>',
-
-        // Push — simple up-arrow for quick-push
-        push: '<path d="M8 12V4"/>' +
-              '<path d="M3.5 8l4.5-4.5L12.5 8"/>' +
-              '<path d="M3 14h10"/>',
-
-        // Close — X
-        close: '<path d="M3 3l10 10M13 3l-10 10"/>',
-
-        // Branch — forked nodes
-        branch: '<circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/>' +
-                '<circle cx="11" cy="8" r="1.5"/>' +
-                '<path d="M5 5.5v4.5c0 1 2 1 2 0"/>',
-
-        // Commit — dot with arc (checkmark circle)
-        commit: '<circle cx="8" cy="8" r="5.5"/>' +
-                '<path d="M5.5 8l1.8 1.8 3.2-3.2"/>',
-
-        // Pull — arrow down from cloud
-        pull: '<path d="M12.5 4l-1.5-2-1.5 2"/><path d="M11 9V2"/>' +
-              '<path d="M11 8a3 3 0 1 0 0 6 3 3 0 0 0 .66-.07A5 5 0 0 0 1 9.5c0-1.77 1.19-3.27 2.84-3.76"/>',
-
-        // Check — checkmark
-        check: '<path d="M3 8l3.5 3.5 6.5-7"/>',
-
-        // Settings — gear
-        settings: '<circle cx="8" cy="8" r="2.5"/>' +
-                  '<path d="M8 1.5v2M8 12.5v2M2.5 4.5l1.8 1M11.7 10.5l1.8 1M1.5 8h2M12.5 8h2M2.5 11.5l1.8-1M11.7 5.5l1.8-1"/>',
-
-        // History — clock/counter-clockwise
-        history: '<circle cx="8" cy="8" r="5.5"/>' +
-                 '<path d="M8 4.5v4l2.5 2"/>' +
-                 '<path d="M2 3v3h3"/>',
-
-        // Status — document with check
-        status: '<path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>' +
-                '<path d="M10 2v3h3"/>' +
-                '<path d="M5.5 9l1.5 1.5L10.5 7"/>',
-
-        // Plus — add
-        plus: '<path d="M8 3v10M3 8h10"/>',
-
-        // User — person silhouette
-        user: '<circle cx="8" cy="5" r="3"/>' +
-              '<path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/>',
-
-        // Mail — envelope
-        mail: '<rect x="1.5" y="3.5" width="13" height="9" rx="1"/>' +
-              '<path d="M1.5 4.5l6.5 5 6.5-5"/>',
-
-        // Chevron — small right arrow
-        chevron: '<path d="M5.5 3l5 5-5 5"/>'
-    };
-
-    /**
-     * Render an SVG icon string
-     * @param {string} key  - icon key from PATHS
-     * @param {number} size - width/height in px (default 16)
-     * @returns {string} SVG element HTML
-     */
-    function renderIcon(key, size) {
-        size = size || 16;
-        var path = PATHS[key];
-        if (!path) return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 16 16" ' + SVG_ATTRS + '></svg>';
-        return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 16 16" style="display:block;" ' + SVG_ATTRS + '>' + path + '</svg>';
+    function icon(name, size) {
+        var s = size || 16;
+        var paths = {
+            git: '<circle cx="4" cy="3.4" r="1.25"/><circle cx="4" cy="12.6" r="1.25"/><circle cx="12" cy="5.7" r="1.25"/><path d="M4 4.7v6.6M4 6.3c0 2.1 1.65 3.3 4.1 3.3 2.15 0 3.9-.9 3.9-3.25V4.5"/>',
+            sync: '<path d="M2.4 6.4A5.8 5.8 0 0 1 12 4.3"/><path d="m10.5 2.7 1.8 1.5-1.6 1.8"/><path d="M13.6 9.6A5.8 5.8 0 0 1 4 11.7"/><path d="m5.5 13.3-1.8-1.5L5.3 10"/><circle cx="8" cy="8" r="1.55" fill="currentColor" stroke="none"/>',
+            check: '<path d="m3.2 8.2 3.1 3.1 6.5-6.6"/>',
+            refresh: '<path d="M13.5 5.2A5.5 5.5 0 1 0 14 10"/><path d="M13.5 2.5v2.7h-2.7"/>',
+            upload: '<path d="M8 13.8V3.1M4.7 6.4 8 3.1l3.3 3.3"/><path d="M3 14.5h10"/>',
+            download: '<path d="M8 2.3v10.6m-3.3-3.3L8 12.9l3.3-3.3"/><path d="M3 14.5h10"/>',
+            close: '<path d="m4 4 8 8m0-8-8 8"/>',
+            folder: '<path d="M2.5 4.5h4l1.2 1.3h5.8v6.7h-11z"/>',
+            file: '<path d="M4 2.5h5l2.5 2.5v8.5H4zM9 2.5V5h2.5"/>',
+            warning: '<path d="m8 2.4 5.4 10H2.6z"/><path d="M8 6.1v3.1m0 2.1v.1"/>'
+        };
+        return '<svg class="bt-git-icon" width="' + s + '" height="' + s + '" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">' + (paths[name] || paths.git) + '</g></svg>';
     }
 
-    /**
-     * Render an SVG icon as an <img> data-URI (useful for <img> tags)
-     * @param {string} key
-     * @param {number} size
-     * @returns {string} data:image/svg+xml URI
-     */
-    function renderIconURI(key, size) {
-        var svg = renderIcon(key, size);
-        return 'data:image/svg+xml,' + encodeURIComponent(svg);
+    /* 工作区状态不再直接展示 Git 的双字符代码，而是以图形和悬浮说明表达。 */
+    function changeIcon(kind, size) {
+        var s = size || 16;
+        var paths = {
+            modified: '<path d="m4.1 11.9 7.1-7.1 1.8 1.8-7.1 7.1-2.5.7z"/><path d="m10.4 5.6 1.8 1.8"/>',
+            added: '<circle cx="8" cy="8" r="5.4"/><path d="M8 5.2v5.6M5.2 8h5.6"/>',
+            deleted: '<circle cx="8" cy="8" r="5.4"/><path d="M5.2 8h5.6"/>',
+            untracked: '<path d="M4 2.5h5l2.7 2.7v8.3H4zM9 2.5v2.8h2.7"/><path d="M5.7 10.8h4.6"/>',
+            renamed: '<path d="M3.1 5.7h7.1l-1.7-1.8"/><path d="M12.9 10.3H5.8l1.7 1.8"/><path d="m10.2 3.9 1.8 1.8-1.8 1.8M5.8 8.5 4 10.3l1.8 1.8"/>',
+            conflict: '<path d="m8 2.3 5.5 10H2.5z"/><path d="M8 5.8v3.2m0 2.1v.1"/>'
+        };
+        return '<svg class="bt-git-change-icon" width="' + s + '" height="' + s + '" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + (paths[kind] || paths.modified) + '</g></svg>';
     }
 
-    module.exports = {
-        PATHS: PATHS,
-        renderIcon: renderIcon,
-        renderIconURI: renderIconURI
-    };
+    if (typeof module !== "undefined") module.exports = { icon: icon, changeIcon: changeIcon };
 })();

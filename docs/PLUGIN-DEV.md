@@ -132,6 +132,7 @@ BetterTypora.toast("消息", 3000)  // → 在窗口顶部显示通知 (duration
 
 // File API — 封装 Typora 内部 File 对象
 BetterTypora.saveFile()          // → 触发保存当前文档 (等同 Ctrl+S)
+BetterTypora.saveFileAndWait()   // → Promise, 触发保存并等待写盘完成
 BetterTypora.getCurrentFile()    // → string | null  当前编辑文件的绝对路径
 BetterTypora.getMountFolder()    // → string | null  打开的工作区根目录
 BetterTypora.openFile(path)      // → 切换到指定文件
