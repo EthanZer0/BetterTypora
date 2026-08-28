@@ -38,10 +38,10 @@
 **方式一：安装脚本（推荐，Windows）**
 
 1. 下载仓库到本地（或 `git clone`）
-2. 双击运行 `install.bat`（或命令行执行 `install.ps1`）——自动定位 Typora 安装目录、备份并注入 `window.html`、复制插件目录
+2. 双击运行 `安装.bat`（或命令行执行 `core.ps1`）——自动定位 Typora 安装目录、备份并注入 `window.html`、复制插件目录；无参数时显示菜单（安装/卸载/仅检测/退出）
 3. 重启 Typora
 
-> 脚本幂等（重复运行不重复注入）、自动备份原文件（`window.html.bettertypora.bak`）；卸载：`install.bat -Uninstall`；Typora 装在非标准路径时：`install.bat -TyporaDir "D:\Tools\Typora\resources"`
+> 脚本幂等（重复运行不重复注入）、自动备份原文件（`window.html.bettertypora.bak`）；命令行直通：`安装.bat -Uninstall` 卸载、`安装.bat -TyporaDir "D:\Tools\Typora\resources"` 指定目录、`安装.bat -DetectOnly` 仅检测路径
 
 **方式二：手动安装**
 

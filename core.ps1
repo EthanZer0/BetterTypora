@@ -2,9 +2,9 @@
 # BetterTypora 安装器
 # =====================================================================
 # 用法:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Uninstall
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -TyporaDir "D:\Tools\Typora\resources"
+#   powershell -NoProfile -ExecutionPolicy Bypass -File core.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File core.ps1 -Uninstall
+#   powershell -NoProfile -ExecutionPolicy Bypass -File core.ps1 -TyporaDir "D:\Tools\Typora\resources"
 #
 # 功能:
 #   1. 自动定位 Typora 的 resources 目录 (运行进程 / 注册表卸载信息 / 显式指定)
@@ -31,7 +31,7 @@ function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
 function Write-Err($msg)  { Write-Host "!!  $msg" -ForegroundColor Red }
 
 # ---------------------------------------------------------------------
-# 无参数 → 交互菜单 (双击 install.bat 时的入口)
+# 无参数 → 交互菜单 (双击 安装.bat 时的入口)
 # ---------------------------------------------------------------------
 if (-not $Uninstall -and -not $DetectOnly -and -not $TyporaDir) {
     Write-Host ""
@@ -147,14 +147,14 @@ function Test-HtmlHasBom([string]$path) {
 Write-Step "BetterTypora 安装器 v1.0.0"
 
 if (-not (Test-Path $pluginsSrc)) {
-    Write-Err "未找到插件目录: $pluginsSrc (请把 install.ps1 放在仓库根目录运行)"
+    Write-Err "未找到插件目录: $pluginsSrc (请把 core.ps1 放在仓库根目录运行)"
     exit 1
 }
 
 $resources = Find-TyporaResources
 if (-not $resources) {
     Write-Err "未找到 Typora 安装目录。请先启动一次 Typora, 或用 -TyporaDir 显式指定 resources 目录:"
-    Write-Err '  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -TyporaDir "D:\Tools\Typora\resources"'
+    Write-Err '  powershell -NoProfile -ExecutionPolicy Bypass -File core.ps1 -TyporaDir "D:\Tools\Typora\resources"'
     exit 1
 }
 Write-Ok "Typora resources: $resources"
