@@ -38,41 +38,106 @@ function isExcluded(filePath) {
 // 收起 = 高度归零完全隐藏 (CSS 过渡); 展开由触发热区承担 (每个
 // 目标一个 fixed 元素覆盖其顶部 24px, 仅收起状态可 hover)。
 // 250ms tick: 同步热区位置/可 hover 状态 + 检测动态出现的目标
-// (分屏开合、标签栏重建)。分屏时 split-view 每 150ms 实测
-// offsetHeight 同步 --bt-tabbar-h, 左栏内容/编辑器自动让位
+// (分屏开合、标签栏重建)。分屏时标签栏由固定布局槽位让位，
+// 自动隐藏不再改变左右内容区尺寸。
 // ===================================================================
 var _autoHideOn = false;
-var _autoHideTimer = null;
 var _autoHideTickTimer = null;
-var _autoHideTargets = [];      // [{bar, hotzone}]
+var _autoHideMouseBound = false;
+var _autoHidePointer = { x: -1, y: -1, valid: false };
+var _autoHideTargets = [];      // [{bar, hotzone, timer, handlers}]
 var _autoHideBarSelectors = ["#typora-tab-bar", "#bt-split-right-tabs"];
 
 function _autoHideAttach(bar) {
-    if (!bar || bar.__btAutoHideBound) return;
-    bar.__btAutoHideBound = true;
+    if (!bar || bar.__btAutoHideTarget) return;
+    var target = {
+        bar: bar,
+        hotzone: null,
+        timer: null,
+        rect: null,
+        handlers: {}
+    };
     var hz = document.createElement("div");
     hz.className = "bt-auto-hide-hotzone";
     hz.style.pointerEvents = "none";
-    hz.addEventListener("mouseenter", function () { _autoHideExpand(bar); });
+    target.hotzone = hz;
+    target.handlers.onHotzoneEnter = function () { _autoHideExpand(target); };
+    target.handlers.onBarEnter = function () { _autoHideExpand(target); };
+    target.handlers.onBarLeave = function () { _autoHideCollapseSoon(target); };
+    hz.addEventListener("mouseenter", target.handlers.onHotzoneEnter);
     document.body.appendChild(hz);
-    _autoHideTargets.push({ bar: bar, hotzone: hz });
-    bar.addEventListener("mouseenter", function () { _autoHideExpand(bar); });
-    bar.addEventListener("mouseleave", function () { _autoHideCollapseSoon(bar); });
-    _autoHideSyncTarget({ bar: bar, hotzone: hz });
+    bar.addEventListener("mouseenter", target.handlers.onBarEnter);
+    bar.addEventListener("mouseleave", target.handlers.onBarLeave);
+    bar.__btAutoHideTarget = target;
+    _autoHideTargets.push(target);
+    _autoHideSyncTarget(target);
+
+    // 分屏右栏是动态创建的。首次出现时若鼠标不在标签条上，延迟收起，
+    // 避免发送文件后右栏标签条永久保持展开。
+    if (bar.id === "bt-split-right-tabs") _autoHideCollapseSoon(target);
 }
 
-function _autoHideExpand(bar) {
-    _autoHideCancel();
-    bar.classList.remove("bt-auto-hide-collapsed");
+function _autoHidePointInRect(rect, x, y) {
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
-function _autoHideCollapseSoon(bar) {
-    _autoHideCancel();
+/** 收起状态下的热区: 从窗口顶部覆盖到标签条底部之外 24px。 */
+function _autoHidePointInRevealZone(target, x, y) {
+    if (!target.bar.classList.contains("bt-auto-hide-collapsed")) return false;
+    var r = target.rect;
+    if (r.width < 2) return false;
+    return x >= r.left && x <= r.right && y >= 0 && y <= Math.max(24, r.bottom + 24);
+}
+
+function _autoHidePointerInTarget(target) {
+    if (!_autoHidePointer.valid) return false;
+    var r = target.rect;
+    if (!r) return false;
+    return _autoHidePointInRect(r, _autoHidePointer.x, _autoHidePointer.y) ||
+        _autoHidePointInRevealZone(target, _autoHidePointer.x, _autoHidePointer.y);
+}
+
+function _autoHideClearTimer(target) {
+    if (target.timer) {
+        if (_timers) _timers.clearTimeout(target.timer);
+        target.timer = null;
+    }
+}
+
+function _autoHideEmitVisibility(target) {
+    try {
+        BetterTypora.events.emit("tabs:tabbar-visibility", {
+            id: target.bar.id,
+            collapsed: target.bar.classList.contains("bt-auto-hide-collapsed"),
+            height: target.bar.offsetHeight
+        });
+    } catch (e) {}
+}
+
+function _autoHideExpand(target) {
+    if (!target.bar.classList.contains("bt-auto-hide-collapsed")) {
+        _autoHideClearTimer(target);
+        return;
+    }
+    _autoHideClearTimer(target);
+    target.bar.classList.remove("bt-auto-hide-collapsed");
+    _autoHideSyncTarget(target);
+    _autoHideEmitVisibility(target);
+}
+
+function _autoHideCollapseSoon(target) {
+    _autoHideClearTimer(target);
     if (!_autoHideOn) return;
-    // 延迟收起: 鼠标只是划过时立即恢复展开 (mouseenter 取消)
-    _autoHideTimer = _timers.setTimeout(function () {
+    // 延迟收起: 鼠标只是划过时立即恢复展开 (mouseenter/文档级鼠标捕获取消)
+    target.timer = _timers.setTimeout(function () {
+        target.timer = null;
         if (!_autoHideOn) return;
-        bar.classList.add("bt-auto-hide-collapsed");
+        if (_autoHidePointerInTarget(target)) return;
+        if (!target.bar.classList.contains("bt-auto-hide-collapsed")) {
+            target.bar.classList.add("bt-auto-hide-collapsed");
+            _autoHideSyncTarget(target);
+            _autoHideEmitVisibility(target);
+        }
     }, 250);
 }
 
@@ -80,20 +145,58 @@ function _autoHideCollapseSoon(bar) {
  *  热区覆盖窗口顶边 → 标签条底部 (含 unibody header 区): 鼠标移到
  *  标签条上方的窗口顶边也视为"在范围内", 不会误收起 */
 function _autoHideSyncTarget(t) {
-    if (t.bar.style.display === "none") {
+    var cs = getComputedStyle(t.bar);
+    if (cs.display === "none" || cs.visibility === "hidden") {
+        t.rect = null;
         t.hotzone.style.display = "none";
         return;
     }
     var r = t.bar.getBoundingClientRect();
+    t.rect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width };
     if (r.width < 2) { t.hotzone.style.display = "none"; return; }
     t.hotzone.style.display = "block";
     t.hotzone.style.left = r.left + "px";
     t.hotzone.style.top = "0px";
     t.hotzone.style.width = r.width + "px";
     t.hotzone.style.height = Math.ceil(r.top + 24) + "px";
-    // 展开时禁用指针 (不拦截标签条交互), 收起时恢复可 hover (z 950 > header 900)
+    // 展开时禁用指针 (不拦截标签条交互), 收起时恢复可 hover
     t.hotzone.style.pointerEvents =
         t.bar.classList.contains("bt-auto-hide-collapsed") ? "auto" : "none";
+}
+
+/** 文档级捕获保证编辑器贴片/其他覆盖层之上仍能触发热区逻辑。 */
+function _autoHideOnMouseMove(e) {
+    _autoHidePointer.x = e.clientX;
+    _autoHidePointer.y = e.clientY;
+    _autoHidePointer.valid = true;
+    for (var i = 0; i < _autoHideTargets.length; i++) {
+        var target = _autoHideTargets[i];
+        if (!document.contains(target.bar)) continue;
+        if (_autoHidePointerInTarget(target)) {
+            _autoHideExpand(target);
+        } else if (!target.bar.classList.contains("bt-auto-hide-collapsed") && !target.timer) {
+            _autoHideCollapseSoon(target);
+        }
+    }
+}
+
+function _autoHideOnWindowBlur() {
+    _autoHidePointer.valid = false;
+}
+
+function _autoHideBindPointerTracking() {
+    if (_autoHideMouseBound) return;
+    _autoHideMouseBound = true;
+    document.addEventListener("mousemove", _autoHideOnMouseMove, true);
+    window.addEventListener("blur", _autoHideOnWindowBlur);
+}
+
+function _autoHideUnbindPointerTracking() {
+    if (!_autoHideMouseBound) return;
+    document.removeEventListener("mousemove", _autoHideOnMouseMove, true);
+    window.removeEventListener("blur", _autoHideOnWindowBlur);
+    _autoHideMouseBound = false;
+    _autoHidePointer.valid = false;
 }
 
 /** 周期 tick: 清理已销毁目标 + 同步位置 + 检测动态出现的目标 */
@@ -102,6 +205,11 @@ function _autoHideTick() {
     for (var i = 0; i < _autoHideTargets.length; i++) {
         var t = _autoHideTargets[i];
         if (!document.contains(t.bar)) {
+            _autoHideClearTimer(t);
+            t.hotzone.removeEventListener("mouseenter", t.handlers.onHotzoneEnter);
+            t.bar.removeEventListener("mouseenter", t.handlers.onBarEnter);
+            t.bar.removeEventListener("mouseleave", t.handlers.onBarLeave);
+            t.bar.__btAutoHideTarget = null;
             if (t.hotzone.parentNode) t.hotzone.parentNode.removeChild(t.hotzone);
             continue;
         }
@@ -116,9 +224,8 @@ function _autoHideTick() {
 }
 
 function _autoHideCancel() {
-    if (_autoHideTimer) {
-        _timers.clearTimeout(_autoHideTimer);
-        _autoHideTimer = null;
+    for (var i = 0; i < _autoHideTargets.length; i++) {
+        _autoHideClearTimer(_autoHideTargets[i]);
     }
 }
 
@@ -128,11 +235,18 @@ function _autoHideTeardown() {
         _autoHideTickTimer = null;
     }
     for (var i = 0; i < _autoHideTargets.length; i++) {
-        if (_autoHideTargets[i].hotzone.parentNode) {
-            _autoHideTargets[i].hotzone.parentNode.removeChild(_autoHideTargets[i].hotzone);
+        var target = _autoHideTargets[i];
+        _autoHideClearTimer(target);
+        target.hotzone.removeEventListener("mouseenter", target.handlers.onHotzoneEnter);
+        target.bar.removeEventListener("mouseenter", target.handlers.onBarEnter);
+        target.bar.removeEventListener("mouseleave", target.handlers.onBarLeave);
+        target.bar.__btAutoHideTarget = null;
+        if (target.hotzone.parentNode) {
+            target.hotzone.parentNode.removeChild(target.hotzone);
         }
     }
     _autoHideTargets = [];
+    _autoHideUnbindPointerTracking();
 }
 
 /** 开关自动隐藏 (enable 时 + 设置变更时调用) */
@@ -146,6 +260,7 @@ function setAutoHide(on) {
             if (bar) bar.classList.remove("bt-auto-hide-collapsed");
         }
     } else {
+        _autoHideBindPointerTracking();
         if (!_autoHideTickTimer) {
             _autoHideTickTimer = _timers.setInterval(_autoHideTick, 250);
         }

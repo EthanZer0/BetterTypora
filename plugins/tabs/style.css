@@ -243,11 +243,10 @@ body.unibody-window .typora-tab-chip.active {
 
 /* ===================================================================
  * 自动隐藏 — 鼠标离开标签栏自动收起 (偏好设置 → 标签页 → 设置)
- * 收起后完全隐藏 (height 0), 展开由独立的触发热区承担 (见
+ * 收起后完全隐藏 (普通模式使用 height 0), 展开由独立的触发热区承担 (见
  * #bt-auto-hide-hotzone, 覆盖标签栏顶部 24px, 仅收起时可 hover)。
  * 非分屏标签栏在 content 顶部正常流, 高度收缩后内容自动让位;
- * 分屏浮动时 split-view 每 150ms 实测 offsetHeight 同步
- * --bt-tabbar-h, 左栏内容/编辑器贴片随高度动画平滑让位
+ * 分屏浮动时由固定布局槽位让位, 标签栏只做视觉隐藏, 不触发内容重排
  * =================================================================== */
 #typora-tab-bar {
     transition: height 0.22s ease, opacity 0.22s ease;
@@ -265,19 +264,31 @@ body.unibody-window .typora-tab-chip.active {
    自动隐藏动画 — 用更高特异性 + !important 仅恢复 height/opacity
    过渡 (left/width 仍无过渡, 与现状一致) */
 #typora-tab-bar.bt-tabbar-floating {
-    transition: height 0.22s ease, opacity 0.22s ease !important;
+    transition: opacity 0.22s ease !important;
 }
 
-/* 分屏右栏标签条: 自动隐藏收起 (flex column 容器, 高度归零后右栏
-   内容自动上移让位; 容器在 body 下, 不受 .bt-editor-fixed 禁动画影响)。
-   注意: 收起只改 height, 不动 flex-basis — basis 置 0 会让 flex 布局
-   立即重排, 绕过 height 过渡 (收起瞬跳无动画) */
+/* 分屏左栏: 槽位高度固定, 收起只淡出标签栏, 编辑器位置保持不动。 */
+#typora-tab-bar.bt-tabbar-floating.bt-auto-hide-collapsed {
+    height: var(--bt-tabbar-slot-h, 32px) !important;
+    min-height: var(--bt-tabbar-slot-h, 32px) !important;
+    overflow: hidden !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 分屏右栏标签条: 自动隐藏收起时保留 flex 布局槽位，只淡出视觉层；
+   右栏内容和固定编辑器的位置保持不变。容器在 body 下, 不受
+   .bt-editor-fixed 禁动画影响。 */
 #bt-split-right-tabs {
-    transition: height 0.22s ease, opacity 0.22s ease;
+    height: var(--bt-tabbar-slot-h, 32px);
+    min-height: var(--bt-tabbar-slot-h, 32px);
+    flex: 0 0 var(--bt-tabbar-slot-h, 32px);
+    transition: opacity 0.22s ease;
 }
 #bt-split-right-tabs.bt-auto-hide-collapsed {
-    height: 0 !important;
-    min-height: 0 !important;
+    height: var(--bt-tabbar-slot-h, 32px) !important;
+    min-height: var(--bt-tabbar-slot-h, 32px) !important;
+    flex-basis: var(--bt-tabbar-slot-h, 32px) !important;
     overflow: hidden !important;
     opacity: 0;
     pointer-events: none;
@@ -289,7 +300,9 @@ body.unibody-window .typora-tab-chip.active {
    高于 unibody header (z 900) — 顶边区域的事件不被 header 拦截 */
 .bt-auto-hide-hotzone {
     position: fixed;
-    z-index: 950;
+    /* 必须高于分屏编辑器贴片 (z 60) 和一体化标题栏 (z 900)。
+       右栏编辑器状态下仍由文档级 mousemove 兜底，但热区本身也应可命中。 */
+    z-index: 2147483646 !important;
     pointer-events: none;
     background: transparent;
 }

@@ -3,8 +3,8 @@
  * 全部使用 Typora CSS 变量 + fallback 链 (附录 A 规范), 自适应深浅主题
  * =================================================================== */
 
-/* 分屏容器 — 覆盖编辑区 (侧边栏右侧起), 容器本身不拦截事件
- * 无过渡动画 (布局全部瞬移; 侧边栏动画期间由 transitionrun 即时同步) */
+/* 分屏容器 — 覆盖编辑区 (侧边栏右侧起), 容器本身不拦截事件。
+ * --bt-tabbar-slot-h 是稳定布局槽位; 标签栏隐藏时不改变内容区尺寸。 */
 #bt-split-container {
     position: fixed;
     top: 0;
@@ -12,6 +12,7 @@
     z-index: 50;
     display: flex;
     pointer-events: none;
+    --bt-tabbar-slot-h: 32px;
 }
 
 /* unibody (一体化) 窗口: Typora header (fixed top:0, z-index 900, 含
@@ -52,10 +53,9 @@ body.unibody-window #bt-split-container {
     flex-direction: column;
     background: var(--bg-color, #ffffff);
     overflow: hidden;
-    /* 整体让出浮动标签栏 (JS 设置 --bt-tabbar-h = 实测高度):
-     * 预览内容区顶边 = 标签栏底边, 与编辑器贴片 top=tabH 对齐。
-     * 不能靠内容区 padding 让位 — 容器顶边仍为 0, 视觉上"没算标签栏" */
-    padding-top: var(--bt-tabbar-h, 32px);
+    /* 整体让出固定标签栏槽位。自动隐藏仅改变标签栏视觉层，
+     * 预览内容区顶边与编辑器贴片 top 始终保持一致。 */
+    padding-top: var(--bt-tabbar-slot-h, 32px);
 }
 
 /* 分栏拖拽条 */
@@ -101,7 +101,8 @@ body.unibody-window #bt-split-container {
  * =================================================================== */
 #bt-split-container .bt-split-tabs {
     flex: 0 0 auto;
-    height: 32px;
+    height: var(--bt-tabbar-slot-h, 32px);
+    min-height: var(--bt-tabbar-slot-h, 32px);
     display: flex;
     align-items: center;
     padding: 0 4px;
@@ -244,8 +245,8 @@ body.unibody-window .bt-tabbar-floating {
     top: var(--bt-header-h, 28px) !important;
 }
 
-/* 浮动标签栏 (fixed, top:0) — 左栏容器 padding-top 已整体让位
- * (--bt-tabbar-h), 内容区从标签栏底边开始, 无需额外 padding */
+/* 浮动标签栏 (fixed, top:0) — 左栏容器通过固定槽位整体让位，
+ * 内容区从槽位底边开始, 标签栏隐藏时内容位置不变 */
 
 /* ===================================================================
  * 标签右键菜单 (class 复用 tabs 插件的 .typora-tab-menu 全局样式,

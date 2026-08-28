@@ -46,7 +46,9 @@ var _sidebarRight = 0;
 var _footerH = 0;            // Typora 底部 footer 高度 (容器让位, 避免盖住)
 var _lastContW = 0;          // 容器宽度快照 (变化检测)
 var _lastHOff = -1;          // header 高度快照 (unibody 收起/展开检测)
+var _tabBarSlotH = 32;       // 左右标签栏固定布局槽位高度 (隐藏时不改变)
 var _layoutTimer = null;
+var _layoutSyncRaf = null;       // 一次性布局同步 (合并同一帧内的多次请求)
 var _handlers = {};
 var _ctxMenu = null;
 var _ctxTargetIdx = -1;
@@ -165,7 +167,8 @@ function measureLayout() {
 function getActivePaneRect() {
     if (_activeSide === "left") {
         var hOff = topOffset();
-        var tabH = _tabBarEl ? _tabBarEl.offsetHeight : 0;
+        // 标签栏是固定槽位，隐藏只改变视觉层，不再读取动画中的 offsetHeight。
+        var tabH = _tabBarSlotH;
         return {
             left: _sidebarRight,
             top: hOff + tabH,
@@ -179,16 +182,36 @@ function getActivePaneRect() {
 function syncEditor() {
     if (!_editorEl || !_active) return;
     var r = getActivePaneRect();
-    _editorEl.style.setProperty("--bt-editor-top", r.top + "px");
-    _editorEl.style.setProperty("--bt-editor-left", r.left + "px");
-    _editorEl.style.setProperty("--bt-editor-width", r.width + "px");
-    _editorEl.style.setProperty("--bt-editor-height", r.height + "px");
+    var setStyleIfChanged = function (el, name, value) {
+        if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value);
+    };
+    setStyleIfChanged(_editorEl, "--bt-editor-top", r.top + "px");
+    setStyleIfChanged(_editorEl, "--bt-editor-left", r.left + "px");
+    setStyleIfChanged(_editorEl, "--bt-editor-width", r.width + "px");
+    setStyleIfChanged(_editorEl, "--bt-editor-height", r.height + "px");
     // 浮动标签栏 (左栏顶部)
     if (_tabBarEl) {
-        _tabBarEl.style.setProperty("--bt-tabbar-left", _sidebarRight + "px");
-        _tabBarEl.style.setProperty("--bt-tabbar-width", _els.left.offsetWidth + "px");
-        // 左栏容器让位高度 = 标签栏实测高度 (与贴片 top=tabH 对齐)
-        _els.left.style.setProperty("--bt-tabbar-h", _tabBarEl.offsetHeight + "px");
+        setStyleIfChanged(_tabBarEl, "--bt-tabbar-left", _sidebarRight + "px");
+        setStyleIfChanged(_tabBarEl, "--bt-tabbar-width", _els.left.offsetWidth + "px");
+        setStyleIfChanged(_tabBarEl, "--bt-tabbar-slot-h", _tabBarSlotH + "px");
+        // 左栏内容让位使用固定槽位，标签栏隐藏时仍保持同样的布局起点。
+        setStyleIfChanged(_els.left, "--bt-tabbar-slot-h", _tabBarSlotH + "px");
+    }
+}
+
+/** 合并同一帧内的布局请求，避免 mouse/resize/事件同时触发多次重排。 */
+function scheduleEditorSync() {
+    if (_layoutSyncRaf || !_active) return;
+    _layoutSyncRaf = requestAnimationFrame(function () {
+        _layoutSyncRaf = null;
+        if (_active) syncEditor();
+    });
+}
+
+function stopLayoutSync() {
+    if (_layoutSyncRaf) {
+        cancelAnimationFrame(_layoutSyncRaf);
+        _layoutSyncRaf = null;
     }
 }
 
@@ -207,7 +230,7 @@ function onLayoutTick() {
         _lastContW = contW;
         _lastHOff = hOff;
         measureLayout();
-        syncEditor();
+        scheduleEditorSync();
     }
     // 编辑器滚动持续恢复已移除 (滚动同步方案放弃)
 
@@ -1200,6 +1223,13 @@ function enable() {
     }
     _editorEl = wa.parentElement;
     _tabBarEl = document.getElementById("typora-tab-bar");
+    // 标签栏默认高度为 32px。仅在展开状态下读取一次，之后分屏期间始终
+    // 使用固定槽位，避免自动隐藏动画把大文档重新带入布局重排。
+    if (_tabBarEl && _tabBarEl.offsetHeight >= 16) {
+        _tabBarSlotH = _tabBarEl.offsetHeight;
+    } else {
+        _tabBarSlotH = 32;
+    }
     _leftPreviewPath = BetterTypora.getCurrentFile();
     _rightTabs = [];
     _rightActive = -1;
@@ -1210,6 +1240,7 @@ function enable() {
     _editorEl.classList.add("bt-editor-fixed");
 
     buildDom();
+    _els.container.style.setProperty("--bt-tabbar-slot-h", _tabBarSlotH + "px");
     _active = true;
     _activeSide = "left";
     _pendingSide = null;
@@ -1237,6 +1268,7 @@ function disable() {
     if (!_active) return;
     _active = false;
     _pendingSide = null;
+    stopLayoutSync();
     if (_layoutTimer) { clearInterval(_layoutTimer); _layoutTimer = null; }
     unbindEvents();
     closeCtxMenu();
@@ -1339,12 +1371,13 @@ function resyncTabHighlight() {
  * 窗口 resize (含 Typora 侧边栏动画第一帧的 resize 广播 —
  * frame.js listenCurrentTransition: transitionstart → dispatch resize)。
  * 侧边栏展开/收起时 open class 已切换, getSidebarRight 立即返回目标值,
- * 此处同步布局 — 无滞后无抽搐, 也不需要额外的 transitionrun 监听。
+ * 此处同步布局 — 无滞后无抽搐。标签栏使用固定布局槽位，不参与这里的
+ * 动画同步。
  */
 function onWindowResize() {
     if (!_active) return;
     measureLayout();
-    syncEditor();
+    scheduleEditorSync();
 }
 
 function onClickContainer(e) {
