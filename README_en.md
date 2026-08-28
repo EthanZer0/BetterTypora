@@ -56,7 +56,7 @@ An open-source plugin system for Typora. Enabled by injecting a single line of s
 
 ## Documentation
 
-- [Plugin Development Guide](docs/PLUGIN-DEV.md) — architecture, API reference, manifest, events, debugging, theme adaptation guidelines
+- [Plugin Development Guide](docs/PLUGIN-DEV_EN.md) — architecture, API reference, manifest, events, debugging, theme adaptation guidelines
 
 ## License
 
