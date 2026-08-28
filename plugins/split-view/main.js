@@ -45,6 +45,7 @@ var _els = {};
 var _sidebarRight = 0;
 var _footerH = 0;            // Typora 底部 footer 高度 (容器让位, 避免盖住)
 var _lastContW = 0;          // 容器宽度快照 (变化检测)
+var _lastHOff = -1;          // header 高度快照 (unibody 收起/展开检测)
 var _layoutTimer = null;
 var _handlers = {};
 var _ctxMenu = null;
@@ -196,11 +197,15 @@ function onLayoutTick() {
     var right = getSidebarRight();
     var footerEl = document.querySelector(".ty-footer");
     var fh = footerEl ? footerEl.offsetHeight : 0;
-    // 容器宽度变化检测 (窗口 resize / 自身宽度调整时贴片需同步)
+    var hOff = topOffset();
+    // 容器宽度变化检测 (窗口 resize / 自身宽度调整时贴片需同步);
+    // header 高度变化检测 (unibody 标题栏收起/展开 → 容器/贴片顶边跟随)
     var contW = _els.container.offsetWidth;
     var contChanged = contW && Math.abs(contW - _lastContW) > 2;
-    if (Math.abs(right - _sidebarRight) > 2 || Math.abs(fh - _footerH) > 2 || contChanged) {
+    if (Math.abs(right - _sidebarRight) > 2 || Math.abs(fh - _footerH) > 2 ||
+        contChanged || hOff !== _lastHOff) {
         _lastContW = contW;
+        _lastHOff = hOff;
         measureLayout();
         syncEditor();
     }
