@@ -3,6 +3,8 @@
     "use strict";
 
     var childProcess = reqnode("child_process");
+    var fs = reqnode("fs");
+    var path = reqnode("path");
 
     function GitAdapter(logger) {
         this.logger = logger || console;
@@ -106,6 +108,14 @@
         return this.exec(root, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
     };
 
+    /* 供双栏比较使用的零上下文 patch；行级布局由视图层按 hunk 构造。 */
+    GitAdapter.prototype.diffPatch = function (root, oldPath, worktreePath) {
+        var args = ["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames", "HEAD", "--"];
+        if (oldPath) args.push(oldPath);
+        if (worktreePath && worktreePath !== oldPath) args.push(worktreePath);
+        return this.exec(root, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    };
+
     GitAdapter.prototype.log = function (root, limit) {
         return this.exec(root, ["-c", "core.quotePath=false", "log", "-n", String(limit || 20), "--date=iso", "--pretty=format:%H%x1f%an%x1f%ad%x1f%s"], { timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).then(function (r) {
             if (!r.success) return r;
@@ -114,8 +124,53 @@
         });
     };
 
+    /* 返回某个快照直接改动过的文件；--root 令第一个提交也能正常列出新增文件。 */
+    GitAdapter.prototype.commitFiles = function (root, revision) {
+        return this.exec(root, ["-c", "core.quotePath=false", "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", revision], { timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(function (result) {
+            if (!result.success) return result;
+            return { success: true, files: parseCommitFiles(result.output) };
+        });
+    };
+
+    /* rev-list 对根提交也会成功返回，因此无需依赖失败文本判断“没有父提交”。 */
+    GitAdapter.prototype.commitParent = function (root, revision) {
+        return this.exec(root, ["rev-list", "--parents", "-n", "1", revision], { timeout: 10000 }).then(function (result) {
+            if (!result.success) return result;
+            var parts = String(result.output || "").trim().split(/\s+/);
+            return { success: true, parent: parts.length > 1 ? parts[1] : null };
+        });
+    };
+
+    /* 比较两个快照的零上下文 patch，首个提交使用 --root 与空树比较。 */
+    GitAdapter.prototype.commitDiffPatch = function (root, parent, revision, oldPath, newPath) {
+        var args = ["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames"];
+        if (parent) args.push(parent, revision);
+        else args.push("--root", revision);
+        args.push("--");
+        if (oldPath) args.push(oldPath);
+        if (newPath && newPath !== oldPath) args.push(newPath);
+        return this.exec(root, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    };
+
     GitAdapter.prototype.show = function (root, revision, filePath) {
         return this.exec(root, ["show", revision + ":" + filePath], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    };
+
+    GitAdapter.prototype.readWorktreeFile = function (root, filePath) {
+        return new Promise(function (resolve) {
+            try {
+                var target = path.resolve(root, filePath);
+                fs.readFile(target, "utf8", function (error, content) {
+                    if (error) {
+                        if (error.code === "ENOENT") return resolve({ success: true, missing: true, output: "" });
+                        return resolve({ success: false, error: error.message || "无法读取工作区文件" });
+                    }
+                    resolve({ success: true, missing: false, output: String(content || "") });
+                });
+            } catch (e) {
+                resolve({ success: false, error: e.message || "无法读取工作区文件" });
+            }
+        });
     };
 
     function parseStatus(output) {
@@ -163,6 +218,22 @@
             if (parts.length >= 4) commits.push({ hash: parts[0], author: parts[1], date: parts[2], message: parts.slice(3).join("\x1f") });
         }
         return commits;
+    }
+
+    function parseCommitFiles(output) {
+        var files = [];
+        var lines = String(output || "").split("\n");
+        for (var i = 0; i < lines.length; i++) {
+            if (!lines[i]) continue;
+            var parts = lines[i].split("\t");
+            var code = parts[0] || "M";
+            var renamed = /^(R|C)/.test(code);
+            var oldPath = renamed ? parts[1] : null;
+            var filePath = renamed ? parts[2] : parts[1];
+            if (!filePath) continue;
+            files.push({ code: code, path: filePath, previousPath: oldPath });
+        }
+        return files;
     }
 
     if (typeof module !== "undefined") module.exports = GitAdapter;

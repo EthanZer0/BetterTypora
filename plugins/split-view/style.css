@@ -252,3 +252,56 @@ body.unibody-window .bt-tabbar-floating {
  * 标签右键菜单 (class 复用 tabs 插件的 .typora-tab-menu 全局样式,
  * 此处无需额外规则)
  * =================================================================== */
+
+/* ===================================================================
+ * Git DiffSession — 独立覆盖层，不接管 Typora 全局源码编辑器。
+ * 行高固定、源码不换行，保证左右栏逐行同步滚动。
+ * =================================================================== */
+.bt-split-diff-session {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--bg-color, #fff);
+    color: var(--text-color, #333);
+    font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+}
+.bt-split-diff-toolbar {
+    display: flex;
+    flex: 0 0 40px;
+    align-items: center;
+    min-width: 0;
+    height: 40px;
+    padding: 0 10px 0 14px;
+    border-bottom: 1px solid var(--window-border, #ddd);
+    background: var(--side-bar-bg-color, var(--bg-color, #fff));
+    box-sizing: border-box;
+}
+.bt-split-diff-title { display: inline-flex; align-items: center; min-width: 0; gap: 7px; overflow: hidden; font-size: 12px; font-weight: 600; }
+.bt-split-diff-title > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-split-diff-glyph { color: var(--active-file-text-color, var(--text-color, #555)); font-size: 15px; line-height: 1; }
+.bt-split-diff-summary { flex: 0 0 auto; margin-left: 12px; padding: 2px 7px; border-radius: 10px; background: var(--control-hover-bg-color, rgba(127,127,127,.12)); color: var(--secondary-text-color, var(--text-color, #777)); font-size: 11px; }
+.bt-split-diff-actions { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.bt-split-diff-actions button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--secondary-text-color, var(--text-color, #666)); cursor: pointer; font: inherit; font-size: 15px; transition: background .15s ease, color .15s ease; }
+.bt-split-diff-actions button:hover { background: var(--control-hover-bg-color, rgba(127,127,127,.12)); color: var(--text-color, #333); }
+.bt-split-diff-columns { display: flex; flex: 1; min-height: 0; }
+.bt-split-diff-pane { display: flex; flex: 1 1 0; min-width: 240px; flex-direction: column; overflow: hidden; }
+.bt-split-diff-pane-title { flex: 0 0 30px; height: 30px; padding: 0 12px; border-bottom: 1px solid var(--window-border, #ddd); color: var(--secondary-text-color, var(--text-color, #777)); font-size: 11px; font-weight: 600; line-height: 30px; box-sizing: border-box; }
+.bt-split-diff-divider { flex: 0 0 4px; cursor: col-resize; background: var(--window-border, #ddd); transition: background .15s ease; }
+.bt-split-diff-divider:hover, .bt-split-diff-divider.dragging { background: var(--active-border-color, #4a90d9); }
+.bt-split-diff-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono, "Cascadia Mono", Consolas, monospace); font-size: 12px; line-height: 22px; tab-size: 4; }
+.bt-split-diff-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); height: 22px; min-height: 22px; box-sizing: border-box; }
+.bt-split-diff-line-number { padding-right: 9px; border-right: 1px solid color-mix(in srgb, var(--window-border, #ddd) 68%, transparent); color: var(--secondary-text-color, var(--text-color, #888)); text-align: right; user-select: none; }
+.bt-split-diff-code { display: block; min-width: max-content; padding: 0 12px; color: inherit; font: inherit; white-space: pre; }
+.bt-split-diff-row.is-removed { background: color-mix(in srgb, var(--danger-color, #c44) 12%, transparent); }
+.bt-split-diff-row.is-added { background: color-mix(in srgb, var(--active-file-text-color, #468) 12%, transparent); }
+.bt-split-diff-row.is-modified { background: color-mix(in srgb, var(--active-file-text-color, #468) 9%, transparent); }
+.bt-split-diff-row.is-current-change { box-shadow: inset 3px 0 0 var(--active-file-text-color, #468); }
+.bt-split-diff-row.is-current-change .bt-split-diff-line-number { color: var(--text-color, #333); font-weight: 600; }
+@media (max-width: 620px) {
+    .bt-split-diff-pane { min-width: 180px; }
+    .bt-split-diff-line-number { padding-right: 6px; }
+    .bt-split-diff-row { grid-template-columns: 40px minmax(0, 1fr); }
+}

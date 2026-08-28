@@ -212,6 +212,72 @@
         });
     };
 
+    SyncEngine.prototype.openDiff = function (relativePath) {
+        var self = this;
+        var state = this.store.get();
+        var file = this.api.getCurrentFile ? this.api.getCurrentFile() : state.currentFile;
+        var relative = relativePath || this.workspace.relative(state.root, file);
+        if (!state.root || !relative) return Promise.resolve(this._fail("当前文档不在同步仓库内"));
+        var fileInfo = null;
+        var files = state.files || [];
+        for (var i = 0; i < files.length; i++) {
+            if (files[i].path === relative) {
+                fileInfo = files[i];
+                break;
+            }
+        }
+        if (!fileInfo) return Promise.resolve(this._fail("该文件没有可显示的未提交差异"));
+        return this.history.compareFile(state.root, relative, fileInfo).then(function (result) {
+            if (!result.success) return self._fail(result.error);
+            var opened = self._openDiffModel(result);
+            if (!opened.success) return self._fail(opened.error);
+            return result;
+        });
+    };
+
+    SyncEngine.prototype.openSnapshotDetail = function (revision) {
+        var self = this;
+        var state = this.store.get();
+        if (!state.root || !state.isRepo || !revision) return Promise.resolve(this._fail("无法读取快照详情"));
+        return this.history.loadCommitFiles(state.root, revision).then(function (result) {
+            if (!result.success) return self._fail(result.error || "无法读取快照文件");
+            var commit = null;
+            var commits = state.commits || [];
+            for (var i = 0; i < commits.length; i++) if (commits[i].hash === revision) commit = commits[i];
+            self.store.update({ historyDetail: { hash: revision, message: commit ? commit.message : "快照 " + String(revision).substring(0, 7), date: commit ? commit.date : "", files: result.files || [] }, error: "" });
+            return { success: true, files: result.files || [] };
+        });
+    };
+
+    SyncEngine.prototype.closeSnapshotDetail = function () {
+        this.store.update({ historyDetail: null });
+    };
+
+    SyncEngine.prototype.openSnapshotDiff = function (revision, filePath) {
+        var self = this;
+        var state = this.store.get();
+        var detail = state.historyDetail;
+        if (!state.root || !detail || detail.hash !== revision) return Promise.resolve(this._fail("快照详情已失效，请重新打开"));
+        var fileInfo = null;
+        var files = detail.files || [];
+        for (var i = 0; i < files.length; i++) if (files[i].path === filePath) fileInfo = files[i];
+        if (!fileInfo) return Promise.resolve(this._fail("未找到该快照中的文件"));
+        return this.history.compareSnapshotFile(state.root, revision, fileInfo).then(function (result) {
+            if (!result.success) return self._fail(result.error);
+            var opened = self._openDiffModel(result);
+            if (!opened.success) return self._fail(opened.error);
+            return result;
+        });
+    };
+
+    SyncEngine.prototype._openDiffModel = function (model) {
+        if (!window.BetterTypora.commands.has || !window.BetterTypora.commands.has("split-view:open-diff")) {
+            return { success: false, error: "分屏插件不可用，无法打开差异视图" };
+        }
+        var opened = window.BetterTypora.commands.execute("split-view:open-diff", model);
+        return opened === false ? { success: false, error: "无法打开差异视图" } : { success: true };
+    };
+
     SyncEngine.prototype.loadHistory = function () {
         var state = this.store.get();
         if (!state.root || !state.isRepo) return Promise.resolve({ success: false, error: "当前还不是 Git 仓库" });

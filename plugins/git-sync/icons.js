@@ -7,6 +7,7 @@
         var paths = {
             git: '<circle cx="4" cy="3.4" r="1.25"/><circle cx="4" cy="12.6" r="1.25"/><circle cx="12" cy="5.7" r="1.25"/><path d="M4 4.7v6.6M4 6.3c0 2.1 1.65 3.3 4.1 3.3 2.15 0 3.9-.9 3.9-3.25V4.5"/>',
             sync: '<path d="M2.4 6.4A5.8 5.8 0 0 1 12 4.3"/><path d="m10.5 2.7 1.8 1.5-1.6 1.8"/><path d="M13.6 9.6A5.8 5.8 0 0 1 4 11.7"/><path d="m5.5 13.3-1.8-1.5L5.3 10"/><circle cx="8" cy="8" r="1.55" fill="currentColor" stroke="none"/>',
+            compare: '<path d="M3 3.2h4.1M3 3.2v4.1M13 12.8H8.9m4.1 0V8.7"/><path d="m3 7.3 3.2-3.2M13 8.7 9.8 11.9"/><path d="M5.4 12.8H3v-2.4M10.6 3.2H13v2.4"/>',
             check: '<path d="m3.2 8.2 3.1 3.1 6.5-6.6"/>',
             refresh: '<path d="M13.5 5.2A5.5 5.5 0 1 0 14 10"/><path d="M13.5 2.5v2.7h-2.7"/>',
             upload: '<path d="M8 13.8V3.1M4.7 6.4 8 3.1l3.3 3.3"/><path d="M3 14.5h10"/>',

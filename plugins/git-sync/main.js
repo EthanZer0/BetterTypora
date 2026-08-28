@@ -56,7 +56,7 @@ module.exports = {
         api.registerCommand("save-snapshot", function () { return engine.saveSnapshot(); }, "保存 Git 本地快照");
         api.registerCommand("sync", function () { return engine.sync(); }, "同步笔记仓库");
         api.registerCommand("fetch", function () { return engine.fetch(); }, "获取远程仓库状态");
-        api.registerCommand("show-diff", function () { panel.open(); return engine.diffCurrent(); }, "查看当前文档差异");
+        api.registerCommand("show-diff", function () { return engine.openDiff(); }, "在双栏视图中比较当前文档差异");
         api.registerCommand("show-history", function () { panel.open(); return engine.loadHistory(); }, "查看 Git 快照历史");
 
         addUnsubscriber(BT.onFileEvent("opened", function () {

@@ -83,6 +83,26 @@
         var action = target.getAttribute("data-action");
         var file = target.getAttribute("data-file");
         var state = this.store.get();
+        if (action === "history-commit") {
+            this.engine.openSnapshotDetail(target.getAttribute("data-commit"));
+            return;
+        }
+        if (action === "history-back") {
+            this.engine.closeSnapshotDetail();
+            return;
+        }
+        if (action === "snapshot-diff-file") {
+            this.engine.openSnapshotDiff(target.getAttribute("data-commit"), file).then(function (result) {
+                if (result && result.success) self.close();
+            });
+            return;
+        }
+        if (action === "diff-file") {
+            this.engine.openDiff(file).then(function (result) {
+                if (result && result.success) self.close();
+            });
+            return;
+        }
         if (file && state.root) {
             if (this.api.openFile) this.api.openFile(path.join(state.root, file));
             return;
@@ -93,7 +113,9 @@
         else if (action === "snapshot") this.engine.saveSnapshot().then(function () { self.engine.loadHistory(); });
         else if (action === "sync") this.engine.sync().then(function () { self.engine.loadHistory(); });
         else if (action === "fetch") this.engine.fetch();
-        else if (action === "diff") this.engine.diffCurrent();
+        else if (action === "diff") this.engine.openDiff().then(function (result) {
+            if (result && result.success) self.close();
+        });
         else if (action === "history") this.engine.loadHistory();
     };
 
@@ -177,7 +199,7 @@
         // 不能使用原生 header：Typora 将所有 header 全局设为 fixed，会使抽屉工具栏被父容器上沿裁切。
         var html = '<div class="bt-git-panel-toolbar" role="toolbar"><div class="bt-git-panel-context">' + icons.icon("git", 16) + '<span title="' + this.escapeHtml(state.root || "") + '">' + this.escapeHtml(branch) + "</span></div><div class=\"bt-git-panel-actions\">";
         if (!state.isRepo) html += '<button class="bt-git-action-button" data-action="init" title="初始化笔记仓库">' + icons.icon("folder", 15) + "</button>";
-        else html += '<button class="bt-git-action-button" data-action="snapshot" title="保存快照"' + (busy ? " disabled" : "") + ">" + icons.icon("upload", 15) + '</button><button class="bt-git-action-button" data-action="sync" title="同步"' + (busy ? " disabled" : "") + ">" + icons.icon("sync", 15) + "</button>";
+        else html += '<button class="bt-git-action-button" data-action="snapshot" title="保存快照"' + (busy ? " disabled" : "") + ">" + icons.icon("upload", 15) + '</button><button class="bt-git-action-button" data-action="sync" title="同步"' + (busy ? " disabled" : "") + ">" + icons.icon("sync", 15) + '</button><button class="bt-git-action-button" data-action="diff" title="比较当前文件差异"' + (busy ? " disabled" : "") + ">" + icons.icon("compare", 15) + "</button>";
         html += '<button class="bt-git-action-button" data-action="refresh" title="刷新"' + (busy ? " disabled" : "") + ">" + icons.icon("refresh", 15) + '</button><button class="bt-git-action-button" data-action="close" title="关闭">' + icons.icon("close", 15) + "</button></div></div>";
         html += '<main class="bt-git-panel-body">';
         if (state.error) html += '<div class="bt-git-inline-error">' + icons.icon("warning", 14) + '<span>' + this.escapeHtml(state.error) + "</span></div>";
@@ -191,17 +213,36 @@
                 var fileInfo = splitFilePath(files[i].path);
                 html += '<button class="bt-git-file bt-git-file-' + change.kind + '" data-file="' + this.escapeHtml(files[i].path) + '" title="' + this.escapeHtml(change.label + " · " + files[i].path) + '"><span class="bt-git-file-status" aria-label="' + this.escapeHtml(change.label) + '">' + icons.changeIcon(change.kind, 16) + '</span><span class="bt-git-file-text"><span class="bt-git-file-name">' + this.escapeHtml(fileInfo.name) + '</span>';
                 if (fileInfo.directory) html += '<span class="bt-git-file-directory">' + this.escapeHtml(fileInfo.directory) + "</span>";
-                html += "</span></button>";
+                html += '</span><span class="bt-git-file-diff" data-action="diff-file" data-file="' + this.escapeHtml(files[i].path) + '" title="比较此文件差异">' + icons.icon("compare", 14) + "</span></button>";
             }
             if (files.length > max) html += '<div class="bt-git-more">还有 ' + (files.length - max) + " 个文件</div>";
             html += "</div>";
         }
-        html += "</section><section class=\"bt-git-section bt-git-snapshots\"><div class=\"bt-git-section-title\"><span>最近快照</span><button class=\"bt-git-history-refresh\" data-action=\"history\" title=\"刷新快照\">" + icons.icon("refresh", 13) + "</button></div>";
-        if (!state.isRepo || !state.commits || !state.commits.length) html += '<div class="bt-git-simple-empty">暂无快照</div>';
-        else {
-            html += '<div class="bt-git-history">';
-            for (var j = 0; j < state.commits.length; j++) html += '<div class="bt-git-commit"><span class="bt-git-commit-marker"></span><div class="bt-git-commit-content"><div class="bt-git-commit-main"><span>' + this.escapeHtml(state.commits[j].message) + '</span><code>' + this.escapeHtml(state.commits[j].hash.substring(0, 7)) + '</code></div><time>' + this.escapeHtml(formatSnapshotTime(state.commits[j].date)) + "</time></div></div>";
-            html += "</div>";
+        var detail = state.historyDetail;
+        html += "</section><section class=\"bt-git-section bt-git-snapshots\">";
+        if (detail) {
+            html += '<div class="bt-git-section-title bt-git-history-detail-title"><button class="bt-git-history-back" data-action="history-back" title="返回快照列表">‹</button><span>快照详情</span></div>';
+            html += '<div class="bt-git-history-detail-meta"><div title="' + this.escapeHtml(detail.message || "") + '">' + this.escapeHtml(detail.message || "快照") + '</div><code>' + this.escapeHtml(String(detail.hash || "").substring(0, 7)) + "</code></div>";
+            if (!detail.files || !detail.files.length) html += '<div class="bt-git-simple-empty">这个快照没有文件改动</div>';
+            else {
+                html += '<div class="bt-git-file-list bt-git-history-file-list">';
+                for (var j = 0; j < detail.files.length; j++) {
+                    var historyChange = getFileChange(detail.files[j].code);
+                    var historyFile = splitFilePath(detail.files[j].path);
+                    html += '<button type="button" class="bt-git-file bt-git-history-file bt-git-file-' + historyChange.kind + '" data-action="snapshot-diff-file" data-commit="' + this.escapeHtml(detail.hash) + '" data-file="' + this.escapeHtml(detail.files[j].path) + '" title="比较 ' + this.escapeHtml(historyChange.label + " · " + detail.files[j].path) + '"><span class="bt-git-file-status">' + icons.changeIcon(historyChange.kind, 16) + '</span><span class="bt-git-file-text"><span class="bt-git-file-name">' + this.escapeHtml(historyFile.name) + '</span>';
+                    if (historyFile.directory) html += '<span class="bt-git-file-directory">' + this.escapeHtml(historyFile.directory) + "</span>";
+                    html += '</span><span class="bt-git-history-file-open">' + icons.icon("compare", 14) + "</span></button>";
+                }
+                html += "</div>";
+            }
+        } else {
+            html += '<div class="bt-git-section-title"><span>最近快照</span><button class="bt-git-history-refresh" data-action="history" title="刷新快照">' + icons.icon("refresh", 13) + "</button></div>";
+            if (!state.isRepo || !state.commits || !state.commits.length) html += '<div class="bt-git-simple-empty">暂无快照</div>';
+            else {
+                html += '<div class="bt-git-history">';
+                for (var k = 0; k < state.commits.length; k++) html += '<button type="button" class="bt-git-commit" data-action="history-commit" data-commit="' + this.escapeHtml(state.commits[k].hash) + '" title="查看此快照的文件改动"><span class="bt-git-commit-marker"></span><span class="bt-git-commit-content"><span class="bt-git-commit-main"><span>' + this.escapeHtml(state.commits[k].message) + '</span><code>' + this.escapeHtml(state.commits[k].hash.substring(0, 7)) + '</code></span><time>' + this.escapeHtml(formatSnapshotTime(state.commits[k].date)) + "</time></span></button>";
+                html += "</div>";
+            }
         }
         html += "</section></main>";
         this.el.innerHTML = html;

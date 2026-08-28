@@ -15,6 +15,7 @@
             behind: 0,
             currentFile: null,
             commits: [],
+            historyDetail: null,
             diff: "",
             message: "",
             error: "",
@@ -59,7 +60,7 @@
     };
 
     StateStore.prototype.clear = function () {
-        this.update({ phase: "idle", root: null, isRepo: false, branch: "", upstream: "", remoteUrl: "", files: [], ahead: 0, behind: 0, currentFile: null, commits: [], diff: "", message: "", error: "", conflict: false });
+        this.update({ phase: "idle", root: null, isRepo: false, branch: "", upstream: "", remoteUrl: "", files: [], ahead: 0, behind: 0, currentFile: null, commits: [], historyDetail: null, diff: "", message: "", error: "", conflict: false });
     };
 
     if (typeof module !== "undefined") module.exports = StateStore;

@@ -20,6 +20,7 @@ var logger = BetterTypora.logger;
 var fs = require("fs");
 var path = require("path");
 var renderer = require("./renderer");
+var DiffSession = require("./diff-session");
 
 var escapeHtml = function (s) {
     return String(s == null ? "" : s)
@@ -54,6 +55,7 @@ var _ctxMenu = null;
 var _ctxTargetIdx = -1;
 var _previewThemeStyle = null;  // 注入的主题预览样式元素
 var _themeUnsub = null;         // theme.onChange 解绑
+var _diffSession = null;        // Git 只读比较会话，不影响普通分屏状态
 
 /* ------------------------------------------------------------------ */
 /* tabs 插件协作 (命令通道)                                               */
@@ -66,6 +68,36 @@ function tabsCmd(cmd) {
     } catch (e) {
         return null;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Git Diff 会话                                                       */
+/* ------------------------------------------------------------------ */
+
+function openDiffSession(model) {
+    if (!model || !model.path) {
+        window.BetterTypora.toast("缺少差异文件信息", 2500);
+        return false;
+    }
+    if (!_diffSession) {
+        _diffSession = new DiffSession({
+            onClose: function () {
+                window.BetterTypora.toast("已关闭差异视图", 1400);
+            }
+        });
+    }
+    try {
+        _diffSession.open(model);
+        return true;
+    } catch (e) {
+        logger.error("打开差异视图失败", e);
+        window.BetterTypora.toast("无法打开差异视图：" + e.message, 3000);
+        return false;
+    }
+}
+
+function closeDiffSession() {
+    if (_diffSession) _diffSession.close();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1539,10 +1571,13 @@ exports.onLoad = function () {
     }, "发送指定文件到右栏 (tabs 菜单调用)");
     api.registerCommand("open-graph", openGraphFromCommand,
         "在分屏打开知识图谱 (图谱标签激活/新建; 分屏未开返回 null 回退全屏)");
+    api.registerCommand("open-diff", openDiffSession, "在双栏只读视图中比较 Git 文件差异");
+    api.registerCommand("close-diff", closeDiffSession, "关闭 Git 差异视图");
     logger.log("分屏插件已加载 (split-view:toggle 开启)");
 };
 
 exports.onUnload = function () {
+    closeDiffSession();
     if (_active) disable();
     logger.log("分屏插件已卸载");
 };
