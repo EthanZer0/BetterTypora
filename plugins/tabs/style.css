@@ -283,13 +283,13 @@ body.unibody-window .typora-tab-chip.active {
     pointer-events: none;
 }
 
-/* 自动隐藏触发热区 — 每个标签条目标一个, 覆盖其顶部 24px,
-   鼠标移入展开对应标签条。展开时 pointer-events:none (tick 同步),
-   不拦截标签栏交互; z-index 100 高于分屏容器 (50)/浮动标签栏 (65),
-   收起后仍可 hover */
+/* 自动隐藏触发热区 — 每个标签条目标一个, 覆盖窗口顶边到标签条底部
+   (含 unibody header 区域), 鼠标移入展开对应标签条。展开时
+   pointer-events:none (tick 同步), 不拦截标签栏交互; z-index 950
+   高于 unibody header (z 900) — 顶边区域的事件不被 header 拦截 */
 .bt-auto-hide-hotzone {
     position: fixed;
-    z-index: 100;
+    z-index: 950;
     pointer-events: none;
     background: transparent;
 }

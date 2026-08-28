@@ -76,7 +76,9 @@ function _autoHideCollapseSoon(bar) {
     }, 250);
 }
 
-/** 同步单个目标的热区位置 + 收起状态下的可 hover 开关 */
+/** 同步单个目标的热区位置 + 收起状态下的可 hover 开关
+ *  热区覆盖窗口顶边 → 标签条底部 (含 unibody header 区): 鼠标移到
+ *  标签条上方的窗口顶边也视为"在范围内", 不会误收起 */
 function _autoHideSyncTarget(t) {
     if (t.bar.style.display === "none") {
         t.hotzone.style.display = "none";
@@ -86,10 +88,10 @@ function _autoHideSyncTarget(t) {
     if (r.width < 2) { t.hotzone.style.display = "none"; return; }
     t.hotzone.style.display = "block";
     t.hotzone.style.left = r.left + "px";
-    t.hotzone.style.top = r.top + "px";
+    t.hotzone.style.top = "0px";
     t.hotzone.style.width = r.width + "px";
-    t.hotzone.style.height = "24px";
-    // 展开时禁用指针 (不拦截标签条交互), 收起时恢复可 hover
+    t.hotzone.style.height = Math.ceil(r.top + 24) + "px";
+    // 展开时禁用指针 (不拦截标签条交互), 收起时恢复可 hover (z 950 > header 900)
     t.hotzone.style.pointerEvents =
         t.bar.classList.contains("bt-auto-hide-collapsed") ? "auto" : "none";
 }
