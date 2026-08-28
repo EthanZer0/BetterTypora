@@ -31,6 +31,25 @@ function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
 function Write-Err($msg)  { Write-Host "!!  $msg" -ForegroundColor Red }
 
 # ---------------------------------------------------------------------
+# 无参数 → 交互菜单 (双击 install.bat 时的入口)
+# ---------------------------------------------------------------------
+if (-not $Uninstall -and -not $DetectOnly -and -not $TyporaDir) {
+    Write-Host ""
+    Write-Host "  ============ BetterTypora 安装器 ============" -ForegroundColor Cyan
+    Write-Host "    1. 安装      (安装或更新)"
+    Write-Host "    2. 卸载      (移除注入行, 保留插件目录)"
+    Write-Host "    3. 仅检测    (显示 Typora 路径, 不改动)"
+    Write-Host "    4. 退出"
+    Write-Host "  =============================================" -ForegroundColor Cyan
+    $menuChoice = Read-Host "  请选择 [1-4]"
+    if ($menuChoice -eq "2")      { $Uninstall = $true }
+    elseif ($menuChoice -eq "3")  { $DetectOnly = $true }
+    elseif ($menuChoice -eq "4" -or $menuChoice -eq "") { Write-Ok "已退出"; exit 0 }
+    elseif ($menuChoice -ne "1")  { Write-Err "无效选择: $menuChoice"; exit 1 }
+    # "1" 或直接回车 → 默认安装, 继续
+}
+
+# ---------------------------------------------------------------------
 # 定位 Typora resources 目录
 # ---------------------------------------------------------------------
 function Find-TyporaResources {
