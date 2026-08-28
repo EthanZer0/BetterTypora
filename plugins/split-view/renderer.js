@@ -4,7 +4,7 @@
  * 右栏/左栏预览区共用。职责:
  *   - marked 解析 (gfm + breaks)
  *   - raw HTML 黑名单过滤 (script/iframe 等危险标签丢弃)
- *   - 图片相对路径 → file:// 绝对路径 (基于文件所在目录)
+ *   - 图片相对路径 → file:// 绝对路径 (基于预览文件所在目录)
  *   - 链接分类: 本地 .md → 主栏打开 (data-bt-link), http → 原样
  *   - MathJax 复用: 渲染后 typesetPromise 处理公式
  */
@@ -103,6 +103,7 @@ function renderTo(container, md, filePath) {
     var svc = window.BetterTypora && window.BetterTypora.markdown;
     if (svc && svc.isAvailable()) {
         var ok = svc.renderTo(container, md, {
+            sourcePath: filePath || null,
             baseDir: filePath ? path.dirname(filePath) : null
         });
         if (ok) return;

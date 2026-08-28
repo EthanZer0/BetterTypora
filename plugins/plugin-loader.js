@@ -1908,14 +1908,70 @@
                 }
             }
 
+            /** Typora 某些图片节点会把 URL 暂存成 [label](target)。 */
+            function unwrapImageSource(s) {
+                s = String(s == null ? "" : s).trim();
+                var m = /^\[([\s\S]*?)\]\(([\s\S]*)\)$/.exec(s);
+                if (!m) return s;
+                var target = m[2].trim();
+                if (target.charAt(0) === "<" && target.charAt(target.length - 1) === ">") {
+                    target = target.slice(1, -1);
+                }
+                return target || m[1].trim();
+            }
+
+            function isExternalResource(s) {
+                return /^(https?:|data:|mailto:|ftp:|\/\/|#)/i.test(s);
+            }
+
+            /** 去掉本地资源上的 Typora 时间戳/片段; 外链绝不能调用此函数。 */
+            function stripLocalSuffix(s) {
+                return String(s || "").split(/[?#]/)[0];
+            }
+
+            /** 将 Typora 常见的 file://D:\\... / file:///D:/... 统一成文件路径。 */
+            function fileHrefToPath(s) {
+                var value = String(s || "").trim();
+                if (!/^file:/i.test(value)) return null;
+                var rest = value.replace(/^file:\/\//i, "");
+                rest = stripLocalSuffix(rest);
+                rest = decodePath(rest);
+                // file:///D:/...、file://D:/...、file://D:\\... 均归一到 D:/...
+                rest = rest.replace(/^[\\/]+([a-zA-Z]:)/, "$1");
+                if (/^[a-zA-Z]:[\\/]/.test(rest)) {
+                    return rest.replace(/\\/g, "/");
+                }
+                // UNC 路径保留双斜杠语义; 普通 file:///absolute/path 则去掉多余斜杠。
+                return rest.replace(/^\\+/, "//").replace(/\\/g, "/");
+            }
+
+            function pathToFileHref(filePath) {
+                return url.pathToFileURL(filePath.replace(/\\/g, path.sep)).href;
+            }
+
+            /** 基于预览文件目录解析相对资源; 不读取当前编辑器文件。 */
+            function resolvePreviewResource(raw, baseDir) {
+                var value = unwrapImageSource(raw);
+                if (!value) return "";
+                if (isExternalResource(value)) return value;
+                var filePath = fileHrefToPath(value);
+                if (filePath) return pathToFileHref(filePath);
+                if (!baseDir) return value;
+                return pathToFileHref(path.resolve(baseDir,
+                    decodePath(stripLocalSuffix(value))));
+            }
+
             /**
              * 渲染到容器。options:
-             *   baseDir: 相对图片/链接解析基准目录
+             *   sourcePath: 正在预览的 Markdown 文件完整路径
+             *   baseDir: 兼容旧调用方的相对资源解析目录 (sourcePath 优先)
              * @returns {boolean} 是否成功
              */
             function renderTo(container, md, options) {
                 options = options || {};
                 if (!container) return false;
+                var sourcePath = options.sourcePath || null;
+                var baseDir = sourcePath ? path.dirname(sourcePath) : (options.baseDir || null);
                 var html = parse(md);
                 if (html === null) return false;
                 // 内容层包裹: 镜像编辑器 #write 结构。主题注入按
@@ -1935,38 +1991,20 @@
                     edits[i].setAttribute("contenteditable", "false");
                 }
 
-                // 图片处理: Typora 解析器输出基于"当前文档"的 file:// 绝对
-                // 路径 (非标准格式 file://D:/ + ?lastModify query + Typora
-                // 事件属性)。统一: 去 query → 重映射到预览文档目录 → 标准
-                // file:/// 格式 → 移除 onerror/onload (函数在预览上下文不存在)
-                if (options.baseDir) {
+                // 图片处理: data-src 是原始资源来源, 优先级高于 parseFrom
+                // 按当前编辑器生成的 src。相对路径必须基于 sourcePath,
+                // 不能基于当前编辑器文件; 外链完整保留 query 参数。
+                if (baseDir || sourcePath) {
                     var imgs = container.querySelectorAll("img");
                     for (var j = 0; j < imgs.length; j++) {
                         var img = imgs[j];
-                        var src = img.getAttribute("src");
-                        if (!src) continue;
-                        var clean = decodePath(src.split(/[?#]/)[0]);   // 去 query + URL 解码
+                        var original = img.getAttribute("data-src") || img.getAttribute("src");
+                        if (!original) continue;
                         try {
-                            if (/^file:/i.test(clean)) {
-                                var abs = clean.replace(/^file:\/\//i, "");
-                                if (/^[a-zA-Z]:\//.test(abs)) {
-                                    // Windows 盘符: 重映射到预览文档目录
-                                    var cur = _btGetCurrentFile();
-                                    var curDir = cur ? path.dirname(cur) : null;
-                                    var rel = curDir ? path.relative(curDir, abs) : abs;
-                                    img.src = url.pathToFileURL(
-                                        path.resolve(options.baseDir, rel)
-                                    ).href;
-                                } else {
-                                    img.src = clean;
-                                }
-                            } else if (!/^(https?:|data:|mailto:|\/\/|#)/i.test(clean)) {
-                                img.src = url.pathToFileURL(
-                                    path.resolve(options.baseDir, clean)
-                                ).href;
-                            } else if (clean !== src) {
-                                img.src = clean;
-                            }
+                            var resolved = resolvePreviewResource(original, baseDir);
+                            if (!resolved) continue;
+                            img.setAttribute("src", resolved);
+                            img.setAttribute("data-src", unwrapImageSource(original));
                         } catch (e) {}
                         // Typora 事件处理器在预览上下文不存在, 移除避免报错
                         img.removeAttribute("onerror");
@@ -1974,28 +2012,22 @@
                     }
                 }
 
-                // 本地链接: 解析目标 (同图片 — Typora 解析器把相对链接输出
-                // 成基于"当前文档"的 file:// 绝对, 需重映射到预览目录) +
+                // 本地链接: 解析目标 (同图片 — 以 sourcePath/baseDir 为准,
+                // 不读取当前编辑器文件) +
                 // 标记 data-bt-link (绝对路径, 点击行为由调用方委托)
                 var links = container.querySelectorAll("a[href]");
                 for (var k = 0; k < links.length; k++) {
                     var href = links[k].getAttribute("href") || "";
-                    if (/^(https?:|data:|mailto:|\/\/|#)/i.test(href)) continue;
-                    var clean = decodePath(href.split(/[?#]/)[0]);   // 去 query + URL 解码
+                    if (isExternalResource(href)) continue;
+                    var clean = unwrapImageSource(href);
+                    if (isExternalResource(clean)) continue;
                     var target = null;
                     try {
-                        if (/^file:/i.test(clean)) {
-                            var abs2 = clean.replace(/^file:\/\//i, "");
-                            if (/^[a-zA-Z]:\//.test(abs2)) {
-                                var cur2 = _btGetCurrentFile();
-                                var curDir2 = cur2 ? path.dirname(cur2) : null;
-                                var rel2 = curDir2 ? path.relative(curDir2, abs2) : abs2;
-                                target = path.resolve(options.baseDir, rel2);
-                            } else {
-                                target = abs2;
-                            }
-                        } else if (options.baseDir) {
-                            target = path.resolve(options.baseDir, clean);
+                        var localPath = fileHrefToPath(clean);
+                        if (localPath) {
+                            target = localPath;
+                        } else if (baseDir) {
+                            target = path.resolve(baseDir, stripLocalSuffix(decodePath(clean)));
                         }
                     } catch (e) {}
                     if (target) {

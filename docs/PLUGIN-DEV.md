@@ -173,10 +173,18 @@ BetterTypora.markdown.renderTo(container, md, options)  // → bool  渲染到�
 BetterTypora.markdown.lastError()              // → string | null  上次失败原因
 ```
 
-`renderTo` 产出 `.bt-write-clone.write` 内容层（镜像编辑器 `#write`，主题规则自动生效），并完成：
+`renderTo` 产出 `.bt-write-clone.write` 内容层（镜像编辑器 `#write`，主题规则自动生效）。推荐传入当前预览文件的完整路径，让资源解析不依赖当前编辑器焦点：
+
+```js
+BetterTypora.markdown.renderTo(container, md, {
+  sourcePath: "D:/notes/README.md"
+})
+```
+
+并完成：
 - **代码块高亮** — Typora 同款 CodeMirror（`pre.md-fences`），行号/换行跟随编辑器选项
 - **公式补渲染** — 块级公式源码态手动喂给 `MathJax.tex2svgPromise`（编辑器 `#write` 的补渲染不覆盖外部容器）
-- **图片/链接重映射** — `options.baseDir` 为相对路径解析基准，相对引用重映射到预览文档目录；本地链接标记 `data-bt-link`（绝对路径，点击行为由调用方委托）
+- **图片/链接重映射** — `options.sourcePath` 为预览文件完整路径，优先用于相对路径解析；`baseDir` 保留为兼容旧调用方的目录参数；本地链接标记 `data-bt-link`（绝对路径，点击行为由调用方委托）
 - 预览容器禁编辑（`contenteditable="false"`），移除 Typora 事件属性（`onerror`/`onload`）
 
 ### 滚动状态服务 — `BetterTypora.scroll`

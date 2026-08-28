@@ -180,6 +180,7 @@ BetterTypora.markdown.lastError()              // → string | null  reason of t
 - **Math formula rendering** — block formulas in source state are fed to `MathJax.tex2svgPromise` (the editor's `#write` post-render does not cover external containers)
 - **Image/link remapping** — `options.baseDir` is the base for relative paths; relative references are remapped to the preview document's directory; local links get a `data-bt-link` attribute (absolute path, click behavior delegated to the caller)
 - Preview containers are made non-editable (`contenteditable="false"`), Typora event attributes (`onerror`/`onload`) removed
+- For image/link remapping, pass `sourcePath` as the full path of the preview file; it takes precedence over the legacy `baseDir` option.
 
 ### Scroll State Service — `BetterTypora.scroll`
 
