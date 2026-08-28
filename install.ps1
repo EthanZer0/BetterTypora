@@ -151,6 +151,17 @@ if (-not (Test-Path $windowHtml)) {
     exit 1
 }
 
+# --- 执行前确认 (Y/N) ---
+if ($Uninstall) {
+    $answer = Read-Host "  将移除 BetterTypora 注入行, 恢复原 window.html (已备份)。继续? (Y/N)"
+} else {
+    $answer = Read-Host "  将安装 BetterTypora 到 $resources (备份 + 注入 + 复制插件)。继续? (Y/N)"
+}
+if ($answer -notmatch '^[Yy]') {
+    Write-Ok "已取消, 未做任何改动"
+    exit 0
+}
+
 # --- 注入/移除注入行 ---
 $hadBom = Test-HtmlHasBom $windowHtml
 $html = Read-Html $windowHtml
