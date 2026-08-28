@@ -125,6 +125,30 @@ function Find-TyporaResources {
 }
 
 # ---------------------------------------------------------------------
+# 文件夹选择器 — 用户手动挑选 Typora resources 目录
+# 兼容两种选择: 直接选 resources 目录, 或选 Typora 安装根目录 (自动补 resources)
+# ---------------------------------------------------------------------
+function Select-ResourcesFolder {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+    } catch {
+        return $null
+    }
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = "请选择 Typora 的 resources 目录 (Typora 安装目录下的 resources 文件夹)"
+    $dlg.ShowNewFolderButton = $false
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        return $null
+    }
+    $p = $dlg.SelectedPath
+    if (-not $p) { return $null }
+    if (Test-Path (Join-Path $p "window.html")) { return $p }
+    $sub = Join-Path $p "resources"
+    if (Test-Path (Join-Path $sub "window.html")) { return $sub }
+    return $null
+}
+
+# ---------------------------------------------------------------------
 # 读写 window.html (保持原编码, 保留/不保留 BOM 与原文件一致)
 # ---------------------------------------------------------------------
 function Read-Html([string]$path) {
@@ -152,16 +176,38 @@ if (-not (Test-Path $pluginsSrc)) {
 }
 
 $resources = Find-TyporaResources
-if (-not $resources) {
-    Write-Err "未找到 Typora 安装目录。请先启动一次 Typora, 或用 -TyporaDir 显式指定 resources 目录:"
-    Write-Err '  powershell -NoProfile -ExecutionPolicy Bypass -File core.ps1 -TyporaDir "D:\Tools\Typora\resources"'
-    exit 1
-}
-Write-Ok "Typora resources: $resources"
 
 if ($DetectOnly) {
+    if (-not $resources) {
+        Write-Err "未检测到 Typora 路径 (检测模式)"
+        exit 1
+    }
+    Write-Ok "Typora resources: $resources"
     Write-Ok "检测模式: 仅定位, 不执行安装"
     exit 0
+}
+
+if (-not $resources) {
+    # 自动检测失败 → 文件夹选择器
+    Write-Err "未自动检测到 Typora 安装目录, 请手动选择"
+    $resources = Select-ResourcesFolder
+    if (-not $resources) {
+        Write-Err "未选择有效目录, 已退出"
+        exit 1
+    }
+    Write-Ok "已选择: $resources"
+} elseif (-not $TyporaDir) {
+    # 自动检测到的路径 → 用户确认是否使用
+    Write-Ok "检测到 Typora: $resources"
+    $usePath = Read-Host "  是否使用此路径? (Y/N)"
+    if ($usePath -notmatch '^[Yy]') {
+        $resources = Select-ResourcesFolder
+        if (-not $resources) {
+            Write-Err "未选择有效目录, 已退出"
+            exit 1
+        }
+        Write-Ok "已选择: $resources"
+    }
 }
 
 $windowHtml = Join-Path $resources "window.html"
