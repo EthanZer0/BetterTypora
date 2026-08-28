@@ -1,6 +1,7 @@
 <p align="center">
   <img src="assets/logo.png" alt="BetterTypora" width="160">
 </p>
+
 <h1 align="center">BetterTypora</h1>
 
 <p align="center">
