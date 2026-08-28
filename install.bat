@@ -1,10 +1,11 @@
 @echo off
 REM =====================================================================
-REM BetterTypora 安装引导 — 双击运行即可
-REM 用法:
-REM   install.bat               安装 (自动定位 Typora, 幂等注入 + 复制插件)
-REM   install.bat -Uninstall   卸载 (移除注入行, 插件目录保留)
-REM   install.bat -TyporaDir "D:\Tools\Typora\resources"   指定目录
+REM BetterTypora installer launcher
+REM Usage:
+REM   install.bat               Install (auto-detect Typora, idempotent inject + copy plugins)
+REM   install.bat -Uninstall    Uninstall (remove injection line, keep plugins dir)
+REM   install.bat -TyporaDir "D:\Tools\Typoraesources"   specify resources dir
+REM   install.bat -DetectOnly   Only detect Typora path, no changes
 REM =====================================================================
 setlocal
 cd /d "%~dp0"
