@@ -133,12 +133,28 @@ function getSidebarRight() {
     return rw > 0 ? rw : 0;
 }
 
+/** unibody (一体化) 窗口顶部标题栏偏移 — Typora header (fixed top:0,
+ * z-index 900) 覆盖视口顶部并拦截鼠标 (含拖拽区), 分屏容器/浮动标签栏
+ * 必须整体下移让出; 经典模式 (native-window) header 高度为 0 */
+function topOffset() {
+    try {
+        var hdr = document.querySelector("header");
+        return hdr ? hdr.offsetHeight : 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
 function measureLayout() {
     _sidebarRight = getSidebarRight();
     // footer 让位: 容器 bottom 止于 footer 上方, 否则 fixed 容器会盖住它
     var footerEl = document.querySelector(".ty-footer");
     _footerH = footerEl ? footerEl.offsetHeight : 0;
+    // unibody header 让位 (JS 实测, CSS 用 --bt-header-h 跟随)
+    var hOff = topOffset();
+    document.documentElement.style.setProperty("--bt-header-h", hOff + "px");
     // 容器全宽 (右栏滚动条贴窗口右缘; 内容右缘留白由 #write padding 提供)
+    _els.container.style.top = hOff + "px";
     _els.container.style.left = _sidebarRight + "px";
     _els.container.style.width = Math.max(0, window.innerWidth - _sidebarRight) + "px";
     _els.container.style.bottom = _footerH + "px";
@@ -147,12 +163,13 @@ function measureLayout() {
 /** 活动栏内容区矩形 (视口坐标) */
 function getActivePaneRect() {
     if (_activeSide === "left") {
+        var hOff = topOffset();
         var tabH = _tabBarEl ? _tabBarEl.offsetHeight : 0;
         return {
             left: _sidebarRight,
-            top: tabH,
+            top: hOff + tabH,
             width: _els.left.offsetWidth,
-            height: Math.max(0, window.innerHeight - tabH - _footerH)
+            height: Math.max(0, window.innerHeight - hOff - tabH - _footerH)
         };
     }
     return _els.rightContent.getBoundingClientRect();

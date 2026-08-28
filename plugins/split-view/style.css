@@ -14,6 +14,14 @@
     pointer-events: none;
 }
 
+/* unibody (一体化) 窗口: Typora header (fixed top:0, z-index 900, 含
+ * -webkit-app-region 拖拽区) 覆盖视口顶部并拦截鼠标 — 分屏容器与
+ * 浮动标签栏整体下移让出 (高度由 JS 实测写入 --bt-header-h);
+ * 经典模式 (native-window) header 高度 0, 本规则不生效 */
+body.unibody-window #bt-split-container {
+    top: var(--bt-header-h, 28px);
+}
+
 /* 侧边栏提升到分屏元素之上 — 容器/贴片 (z 50/60) 在检测到布局变化前
  * 可能覆盖侧边栏区域 (0~239), 侧边栏滑入动画会被盖住 (展开"抽搐") */
 #typora-sidebar {
@@ -227,6 +235,13 @@
     margin: 0 !important;
     /* 无过渡 (布局全部瞬移) */
     transition: none !important;
+}
+
+/* unibody 一体化窗口: 浮动标签栏下移到 header 下方 (同容器让位),
+ * 否则 top:0 区域事件被 header 拦截 — 自动隐藏收起后无法展开、
+ * 标签无法点击 (具体实测: elementFromPoint(500,10)=#top-titlebar) */
+body.unibody-window .bt-tabbar-floating {
+    top: var(--bt-header-h, 28px) !important;
 }
 
 /* 浮动标签栏 (fixed, top:0) — 左栏容器 padding-top 已整体让位
