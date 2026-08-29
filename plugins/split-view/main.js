@@ -56,6 +56,7 @@ var _ctxTargetIdx = -1;
 var _previewThemeStyle = null;  // 注入的主题预览样式元素
 var _themeUnsub = null;         // theme.onChange 解绑
 var _diffSession = null;        // Git 只读比较会话，不影响普通分屏状态
+var _diffLayoutTimer = null;    // 差异视图独立于普通分屏时的标题栏高度同步
 
 /* ------------------------------------------------------------------ */
 /* tabs 插件协作 (命令通道)                                               */
@@ -88,6 +89,8 @@ function openDiffSession(model) {
     }
     try {
         _diffSession.open(model);
+        syncDiffSessionLayout();
+        startDiffLayoutSync();
         return true;
     } catch (e) {
         logger.error("打开差异视图失败", e);
@@ -97,7 +100,31 @@ function openDiffSession(model) {
 }
 
 function closeDiffSession() {
+    stopDiffLayoutSync();
     if (_diffSession) _diffSession.close();
+}
+
+/* 差异会话可以在普通分屏未开启时单独存在，因此不能只依赖分屏布局定时器。 */
+function syncDiffSessionLayout() {
+    if (!_diffSession || !_diffSession.el) return;
+    try {
+        _diffSession.el.style.setProperty("--bt-diff-top", topOffset() + "px");
+    } catch (e) {}
+}
+
+function startDiffLayoutSync() {
+    if (_diffLayoutTimer) return;
+    _diffLayoutTimer = setInterval(function () {
+        if (!_diffSession || !_diffSession.el) return;
+        syncDiffSessionLayout();
+    }, 150);
+}
+
+function stopDiffLayoutSync() {
+    if (_diffLayoutTimer) {
+        clearInterval(_diffLayoutTimer);
+        _diffLayoutTimer = null;
+    }
 }
 
 /* ------------------------------------------------------------------ */

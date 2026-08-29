@@ -268,6 +268,11 @@ body.unibody-window .bt-tabbar-floating {
     color: var(--text-color, #333);
     font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
 }
+/* 一体化窗口的原生标题栏固定在视口顶部且层级高于插件层。
+ * 差异视图必须整体从标题栏下方开始，否则顶部操作按钮会被原生栏遮挡。 */
+body.unibody-window .bt-split-diff-session {
+    top: var(--bt-diff-top, var(--bt-header-h, 28px));
+}
 .bt-split-diff-toolbar {
     display: flex;
     flex: 0 0 40px;
