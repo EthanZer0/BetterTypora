@@ -30,3 +30,4 @@ plugins/*/node_modules/
 
 # === 发布构建产物 ===
 BetterTypora-*.zip
+BetterTypora-*.zip.sha256

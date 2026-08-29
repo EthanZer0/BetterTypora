@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.0.0-4c1?style=for-the-badge&logo=semver&logoColor=white" alt="v1.0.0">
+  <img src="https://img.shields.io/badge/version-v1.1.0-4c1?style=for-the-badge&logo=semver&logoColor=white" alt="v1.1.0">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT">
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
@@ -43,14 +43,14 @@ An open-source plugin system for Typora. Enabled by injecting a single line of s
 **Option 1: Installer script (recommended, Windows)**
 
 1. Download the repo (or `git clone`)
-2. Run `安装.bat` (means "install.bat") — it auto-detects your Typora installation, backs up and injects `window.html`, and copies the plugins. Running without arguments shows a menu (install / uninstall / detect-only / exit).
+2. Fully exit Typora, then run `安装.bat` (means "install.bat") — it auto-detects your Typora installation, backs up and injects `window.html`, explicitly copies and updates the core `plugin-loader.js`, and replaces BetterTypora-managed plugin directories while preserving user plugins and `.cache`. Running without arguments shows a menu (install / uninstall / detect-only / exit).
 3. Restart Typora
 
-> Idempotent (re-running never double-injects), auto-backup (`window.html.bettertypora.bak`). Command-line passthrough: `安装.bat -Uninstall` to uninstall, `安装.bat -TyporaDir "D:\Tools\Typora\resources"` to specify the directory, `安装.bat -DetectOnly` to only detect the path.
+> Idempotent (re-running never double-injects). Only `window.html` is backed up; plugin directories are replaced directly without plugin backups or plugin rollback. Command-line passthrough: `安装.bat -Uninstall` removes the injection and BetterTypora plugins/settings, while `安装.bat -Uninstall -KeepPlugins` removes only the injection and keeps the plugin directories. `安装.bat -TyporaDir "D:\Tools\Typora\resources"` specifies the directory, and `安装.bat -DetectOnly` only detects the path. Use `-Force` only when Typora is confirmed not to hold any files open.
 
 **Option 2: Manual install**
 
-1. Copy the `plugins/` directory into Typora's `resources/` folder
+1. Copy the `plugins/` directory into Typora's `resources/` folder; when updating a plugin, replace its entire same-named directory instead of merging files so obsolete files are removed
 2. Add `<script src="./plugins/plugin-loader.js"></script>` before `</body>` in `resources/window.html`
 3. Restart Typora — the plugin system starts automatically
 

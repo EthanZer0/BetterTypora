@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.0.0-4c1?style=for-the-badge&logo=semver&logoColor=white" alt="v1.0.0">
+  <img src="https://img.shields.io/badge/version-v1.1.0-4c1?style=for-the-badge&logo=semver&logoColor=white" alt="v1.1.0">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT">
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
@@ -43,14 +43,14 @@
 **方式一：安装脚本（推荐，Windows）**
 
 1. 下载仓库到本地（或 `git clone`）
-2. 双击运行 `安装.bat`（或命令行执行 `core.ps1`）——自动定位 Typora 安装目录、备份并注入 `window.html`、复制插件目录；无参数时显示菜单（安装/卸载/仅检测/退出）
+2. 完全退出 Typora 后双击运行 `安装.bat`（或命令行执行 `core.ps1`）——自动定位 Typora 安装目录、备份并注入 `window.html`，复制并更新核心加载器 `plugin-loader.js`，完整替换 BetterTypora 管理的插件目录，同时保留用户插件和 `.cache`；无参数时显示菜单（安装/卸载/仅检测/退出）
 3. 重启 Typora
 
-> 脚本幂等（重复运行不重复注入）、自动备份原文件（`window.html.bettertypora.bak`）；命令行直通：`安装.bat -Uninstall` 卸载、`安装.bat -TyporaDir "D:\Tools\Typora\resources"` 指定目录、`安装.bat -DetectOnly` 仅检测路径
+> 脚本幂等（重复运行不重复注入），只自动备份 `window.html`；插件目录更新采用直接完整替换，不创建插件备份或执行插件回滚。命令行直通：`安装.bat -Uninstall` 移除注入并清理 BetterTypora 插件和设置，`安装.bat -Uninstall -KeepPlugins` 仅移除注入并保留插件，`安装.bat -TyporaDir "D:\Tools\Typora\resources"` 指定目录、`安装.bat -DetectOnly` 仅检测路径。仅在确认 Typora 未占用文件时才使用 `-Force`。
 
 **方式二：手动安装**
 
-1. 将 `plugins/` 目录复制到 Typora 的 `resources/` 下
+1. 将 `plugins/` 目录复制到 Typora 的 `resources/` 下；更新插件时请完整替换同名插件目录，不要只合并复制文件，以清理已经废弃的旧文件
 2. 在 `resources/window.html` 的 `</body>` 前添加：`<script src="./plugins/plugin-loader.js"></script>`
 3. 重启 Typora — 插件系统自动启动
 
