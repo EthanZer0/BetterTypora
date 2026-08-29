@@ -134,8 +134,8 @@ BetterTypora.toast("message", 3000)  // → top-of-window notification (duration
 BetterTypora.saveFile()          // → trigger save of the current document (same as Ctrl+S)
 BetterTypora.getCurrentFile()    // → string | null  absolute path of the current file
 BetterTypora.getMountFolder()    // → string | null  opened workspace root
-BetterTypora.openFile(path)      // → switch to the given file
-BetterTypora.openFileInCurrentWindow(path) // → switch in the current window
+BetterTypora.openFile(path)      // → call Typora's native file-open entry
+BetterTypora.openFileInCurrentWindow(path) // → plugin file-switch entry in the current window
 BetterTypora.reloadFile(path)    // → reload the given file from disk
 BetterTypora.isDocumentEdited()  // → bool  whether the current document has unsaved changes
 
@@ -165,9 +165,11 @@ BetterTypora.plugins             // Raw plugin registry reference (internal obje
 BetterTypora.createTimerGroup()  // → {setTimeout, setInterval, setImmediate, delay, clearTimeout, clearInterval, clearAll, close, count, closed}
 ```
 
+`openFile()` is Typora's native file-open entry, so its exact window behavior is controlled by Typora. Plugins should prefer `openFileInCurrentWindow()` for internal file navigation. Normal local Markdown hyperlinks should be routed by the tabs plugin at click time so Typora's default window-opening behavior is not triggered.
+
 ### Markdown Rendering Service — `BetterTypora.markdown`
 
-Reuses Typora's internal node parser (`parseFrom`) to produce HTML DOM **identical to the editor**. When the parser is unavailable (e.g. Typora upgraded), `parse`/`renderTo` return `null`/`false` so callers can fall back to their own renderer.
+Reuses Typora's internal node parser (`parseFrom`) to produce HTML that closely follows the editor structure. When the parser is unavailable (e.g. Typora upgraded), `parse`/`renderTo` return `null`/`false` so callers can fall back to their own renderer.
 
 ```js
 BetterTypora.markdown.isAvailable()            // → bool  is the native parser available
@@ -260,20 +262,20 @@ BetterTypora.settings.getAll("plugin-id")
 BetterTypora.settings.set("plugin-id", "key", value)
 ```
 
-Settings are persisted to `.cache/<plugin-id>.settings.json` (defaults are filled from `manifest.settings` on first load; persisted values win). Besides code-level read/write, settings can also be edited graphically in the **Preferences → Plugins** page's gear panel (driven by `manifest.settingsSchema`, see below); changes there go through `PluginManager.updateSetting`, which persists and **notifies the plugin in real time** (triggers `api.onSettingChange`) — no restart or reload needed.
+Settings are persisted to `resources/plugins/.cache/<plugin-id>.settings.json` (defaults are filled from `manifest.settings` on first load; persisted values win). Besides code-level read/write, settings can also be edited graphically in the **Preferences → Plugins** page's gear panel (driven by `manifest.settingsSchema`, see below); changes there go through `PluginManager.updateSetting`, which persists and **notifies the plugin in real time** (triggers `api.onSettingChange`) — no restart or reload needed.
 
 ### File Events (FileEventHub)
 
-Unified capture of Typora's file operations, covering **every** open/switch path (sidebar, quick open, menus, file associations, drag-and-drop, new file), built on Typora's native interfaces:
+Unified observation of Typora's main file-operation paths (sidebar, quick open, menus, file associations, drag-and-drop, new file), built on Typora's native interfaces:
 
 | Event | Callback payload | When it fires |
 |------|----------|----------|
-| `opening` | `{path, previousPath, isNew, untitled}` | A file is about to be opened/switched (intent, can be cancelled) |
+| `opening` | `{path, previousPath, isNew, untitled}` | A file is about to be opened/switched (intent notification, not cancellable; some fields depend on the source) |
 | `opened` | `{path, previousPath, bundle}` | File **really finished opening** (bundle ready, includes the initial document) |
 | `closing` | `{path, mountFolder}` | Before window close |
-| `deleted` | `{path, originalPath}` | Current file deleted externally (bundle.filePath cleared) |
+| `deleted` | `{path, originalPath}` | Current file deleted externally (`path` is usually `null`; bundle.filePath cleared) |
 | `renamed` | `{path, previousPath}` | File renamed / saved as |
-| `saved` | `{path}` | File **finished saving** (auto-save / manual save / save-as) |
+| `saved` | `{path}` | Emitted after the save Promise completes successfully (for supported auto-save / manual save / save-as paths) |
 
 ```js
 var unsub = BetterTypora.onFileEvent("opened", function (data) {
@@ -285,7 +287,7 @@ BetterTypora.offFileEvent(unsub);
 **Implementation** (multiple sources + fallback):
 - hooks `File.loadFile` → `opening` (renderer load entry)
 - hooks `File.onFileOpened` / `File.setDocumentState` → `opened` (load complete / main-process state push)
-- wraps `File.FileSave.saveUseNode` / `saveAsUseNode` → `saved` (after async save completes; the precise auto-save moment, replaces file-polling)
+- wraps `File.FileSave.saveUseNode` / `saveAsUseNode` → `saved` (when the save method returns and its Promise completes; replaces file-polling)
 - wraps `JSBridge.invoke` → `opening`(new) / `closing`(window close)
 - polls `File.bundle` (500ms) → `deleted` / `renamed` fallback (bundle reference change = open, path-only change = rename)
 
@@ -307,7 +309,8 @@ var BT = require("bettertypora:api");
 // BT.saveFileAndWait → function  trigger save and wait for completion (Promise)
 // BT.getCurrentFile → function  current file path (string | null)
 // BT.getMountFolder → function  opened workspace root (string | null)
-// BT.openFile       → function  switch to the given file
+// BT.openFile       → function  call Typora's native file-open entry
+// BT.openFileInCurrentWindow → function  plugin file-switch entry in the current window
 // BT.reloadFile     → function  reload the given file from disk
 // BT.isDocumentEdited → function  whether the current document has unsaved changes (bool)
 // BT.escapeHtml     → function  XSS-safe escaping (same as BetterTypora.escapeHtml)
@@ -343,6 +346,8 @@ api.once("event", handler)
 api.off("event", handler)
 api.emit("event", ...args)
 ```
+
+`api.onSettingChange` does not currently return an unsubscribe function. Avoid registering the same listener repeatedly when a plugin is enabled more than once, or track registration state inside the plugin.
 
 ### Lifecycle Hooks
 
@@ -413,7 +418,7 @@ In Typora **Preferences → Plugins**, each plugin row has a gear button (SVG) o
 | `key` | string | Setting key, matching a key in `settings` |
 | `label` | string | Display name in the panel |
 | `type` | string | Control type: `boolean`(switch) \| `number`(number input) \| `text`(text input) \| `select`(dropdown, needs `options` array) |
-| `default` | any | Default value (used when not persisted) |
+| `default` | any | Display fallback in the settings panel when no current value exists; runtime defaults should be declared in `settings` or supplied to `api.getSetting` |
 | `desc` | string | Optional description below the item |
 | `options` | array | Required for `select`; the dropdown options |
 | `min` / `max` | number | Optional bounds for `number` inputs |
@@ -517,7 +522,7 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 - Plugins run in the renderer process with full DOM and Node.js (`reqnode`) access
 - No plugin sandbox — all plugins share the same JS context
 - Plugins are only scanned from `resources/plugins/<id>/`; external code is never executed automatically
-- Settings data lives inside the plugin directory, never written elsewhere on the system
+- Settings data lives in the `.cache/` directory under the plugin root, never written elsewhere on the system
 
 ---
 
@@ -526,7 +531,7 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 | Limitation | Description |
 |------|------|
 | No plugin isolation | All plugins share the JS context; a malicious plugin can access other plugins' data |
-| No CSS hot-reload | JS can be reloaded via `reloadPlugin()`; CSS requires a restart |
+| No automatic CSS hot update | `reloadPlugin()` reinjects CSS; after editing CSS, manually reload the plugin or restart Typora |
 | Startup speed | More plugins → slower startup (each plugin is a synchronous `require`) |
 | No main-process capabilities | Plugins run only in the renderer; cannot intercept Typora's native menu/window events (e.g. the native Ctrl+N "New"), cannot run async cleanup before exit |
 | Typora upgrades | Upgrading overwrites `resources/window.html` — re-add the injection line; `resources/plugins/` and plugin data are unaffected |

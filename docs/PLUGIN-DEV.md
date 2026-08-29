@@ -135,8 +135,8 @@ BetterTypora.saveFile()          // → 触发保存当前文档 (等同 Ctrl+S)
 BetterTypora.saveFileAndWait()   // → Promise, 触发保存并等待写盘完成
 BetterTypora.getCurrentFile()    // → string | null  当前编辑文件的绝对路径
 BetterTypora.getMountFolder()    // → string | null  打开的工作区根目录
-BetterTypora.openFile(path)      // → 切换到指定文件
-BetterTypora.openFileInCurrentWindow(path) // → 在当前窗口复用/切换文件
+BetterTypora.openFile(path)      // → 调用 Typora 原生文件打开入口
+BetterTypora.openFileInCurrentWindow(path) // → 插件内部当前窗口文件切换入口
 BetterTypora.reloadFile(path)    // → 重新从磁盘读取指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 
@@ -165,9 +165,11 @@ BetterTypora.plugins             // 插件注册表原始引用 (内部对象, �
 BetterTypora.createTimerGroup()  // → {setTimeout, setInterval, setImmediate, delay, clearTimeout, clearInterval, clearAll, close, count, closed}
 ```
 
+`openFile()` 是 Typora 原生文件打开入口，具体窗口行为由 Typora 决定；`openFileInCurrentWindow()` 是插件内部文件导航应优先使用的入口。普通本地 Markdown 超链接应交由 tabs 插件在点击阶段路由，以避免触发 Typora 默认的窗口打开行为。
+
 ### Markdown 渲染服务 — `BetterTypora.markdown`
 
-复用 Typora 内部节点解析器（`parseFrom`），产出与编辑器**完全一致**的 HTML DOM。解析器不可用（Typora 升级变动）时 `parse`/`renderTo` 返回 `null`/`false`，调用方可降级到自有渲染器。
+复用 Typora 内部节点解析器（`parseFrom`），尽量保持与编辑器一致的 HTML 结构。解析器不可用（Typora 升级变动）时 `parse`/`renderTo` 返回 `null`/`false`，调用方可降级到自有渲染器。
 
 ```js
 BetterTypora.markdown.isAvailable()            // → bool  原生解析器是否可用
@@ -266,20 +268,20 @@ BetterTypora.settings.getAll("plugin-id")
 BetterTypora.settings.set("plugin-id", "key", value)
 ```
 
-设置持久化到 `.cache/<plugin-id>.settings.json`（首次加载用 `manifest.settings` 填充默认值，已持久化的值优先）。除了代码内读写，设置也可以在 **偏好设置 → 插件** 页面的齿轮设置面板中图形化修改（由 `manifest.settingsSchema` 驱动，见下文）；面板中的改动由 `PluginManager.updateSetting` 持久化并**实时通知插件**（触发 `api.onSettingChange`），无需重启或重载。
+设置持久化到 `resources/plugins/.cache/<plugin-id>.settings.json`（首次加载用 `manifest.settings` 填充默认值，已持久化的值优先）。除了代码内读写，设置也可以在 **偏好设置 → 插件** 页面的齿轮设置面板中图形化修改（由 `manifest.settingsSchema` 驱动，见下文）；面板中的改动由 `PluginManager.updateSetting` 持久化并**实时通知插件**（触发 `api.onSettingChange`），无需重启或重载。
 
 ### 文件事件（FileEventHub）
 
-统一捕获 Typora 的文件操作，覆盖**所有**打开/切换路径（侧边栏、快速打开、菜单、关联文件、拖拽、新建），基于 Typora 原生接口实现：
+统一观测 Typora 的主要文件操作路径（侧边栏、快速打开、菜单、关联文件、拖拽、新建），基于 Typora 原生接口实现：
 
 | 事件 | 回调参数 | 触发时机 |
 |------|----------|----------|
-| `opening` | `{path, previousPath, isNew, untitled}` | 文件将被打开/切换（意图，可被取消） |
+| `opening` | `{path, previousPath, isNew, untitled}` | 文件将被打开/切换（意图通知，不可取消；部分字段按来源提供） |
 | `opened` | `{path, previousPath, bundle}` | 文件**真正打开完成**（bundle 已就绪，含初始文档） |
 | `closing` | `{path, mountFolder}` | 窗口关闭前 |
-| `deleted` | `{path, originalPath}` | 当前文件被外部删除（bundle.filePath 已清空） |
+| `deleted` | `{path, originalPath}` | 当前文件被外部删除（通常 `path` 为 `null`，`bundle.filePath` 已清空） |
 | `renamed` | `{path, previousPath}` | 文件重命名/另存为 |
-| `saved` | `{path}` | 文件**保存完成**（自动保存/手动保存/另存为） |
+| `saved` | `{path}` | 保存 Promise 成功完成后发出（支持自动保存/手动保存/另存为的路径） |
 
 ```js
 var unsub = BetterTypora.onFileEvent("opened", function (data) {
@@ -291,7 +293,7 @@ BetterTypora.offFileEvent(unsub);
 **实现原理**（多数据源 + 兜底）：
 - hook `File.loadFile` → `opening`（渲染进程加载入口）
 - hook `File.onFileOpened` / `File.setDocumentState` → `opened`（加载完成 / 主进程状态推送）
-- 包装 `File.FileSave.saveUseNode` / `saveAsUseNode` → `saved`（异步保存完成后，精确的自动保存时机，替代文件轮询检测）
+- 包装 `File.FileSave.saveUseNode` / `saveAsUseNode` → `saved`（当保存方法返回并完成 Promise 时发出，替代文件轮询检测）
 - 包装 `JSBridge.invoke` → `opening`(新建) / `closing`(关窗)
 - 轮询 `File.bundle`（500ms）→ `deleted` / `renamed` 兜底（bundle 引用变化=打开，仅路径变化=改名）
 
@@ -312,7 +314,8 @@ var BT = require("bettertypora:api");
 // BT.saveFile       → function  触发保存当前文档
 // BT.getCurrentFile → function  返回当前编辑文件路径 (string | null)
 // BT.getMountFolder → function  返回打开的工作区根目录 (string | null)
-// BT.openFile       → function  切换到指定文件
+// BT.openFile       → function  调用 Typora 原生文件打开入口
+// BT.openFileInCurrentWindow → function  插件内部当前窗口文件切换入口
 // BT.reloadFile     → function  重新从磁盘读取指定文件
 // BT.isDocumentEdited → function  返回当前文档是否有未保存更改 (bool)
 // BT.escapeHtml     → function  防 XSS 转义 (与 BetterTypora.escapeHtml 一致)
@@ -348,6 +351,8 @@ api.once("event", handler)
 api.off("event", handler)
 api.emit("event", ...args)
 ```
+
+`api.onSettingChange` 当前不返回取消订阅函数；插件反复启用时应避免重复注册同一个监听器，或在插件自身维护注册状态。
 
 ### 生命周期钩子
 
@@ -418,7 +423,7 @@ window.BetterTypora.commands.execute('tabs:create-untitled');
 | `key` | string | 设置键名, 对应 `settings` 中的键 |
 | `label` | string | 面板中显示的设置名 |
 | `type` | string | 控件类型: `boolean`(开关) \| `number`(数字输入) \| `text`(文本输入) \| `select`(下拉, 需 `options` 数组) |
-| `default` | any | 默认值 (未持久化时使用) |
+| `default` | any | 设置面板无当前值时的显示回退；运行时默认值应配置在 `settings` 或通过 `api.getSetting` 提供 |
 | `desc` | string | 可选, 设置项下方的说明文字 |
 | `options` | array | `select` 类型必填, 下拉选项列表 |
 | `min` / `max` | number | 可选, `number` 类型输入框的上下限 |
@@ -524,7 +529,7 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 - 插件运行在渲染进程，拥有完整 DOM 和 Node.js (`reqnode`) 访问权
 - 没有插件沙箱——所有插件共享同一 JS 上下文
 - 插件只从 `resources/plugins/<id>/` 扫描，不会自动执行外部代码
-- 设置数据存储在插件目录内，不会写入系统其他位置
+- 设置数据存储在插件根目录下的 `.cache/` 内，不会写入系统其他位置
 
 ---
 
@@ -533,7 +538,7 @@ console.log("[HotkeyManager] pressed:", pressed, "key:", b.key);
 | 限制 | 说明 |
 |------|------|
 | 无插件隔离 | 所有插件共享 JS 上下文，恶意插件可访问其他插件数据 |
-| 无热重载 CSS | JS 可通过 `reloadPlugin()` 重载，CSS 需重启 |
+| 无自动 CSS 热更新 | `reloadPlugin()` 会重新注入 CSS；修改 CSS 后需手动重载插件或重启 Typora |
 | 启动速度 | 插件数量越多启动越慢 (每个插件同步 `require` 执行) |
 | 无主进程能力 | 插件只运行在渲染进程；无法拦截 Typora 原生菜单/窗口事件（如原生"新建"菜单的 Ctrl+N），无法在退出前执行异步清理 |
 | Typora 升级 | 升级会覆盖 `resources/window.html`，需重新添加一行注入脚本；`resources/plugins/` 目录及插件数据不受影响 |
