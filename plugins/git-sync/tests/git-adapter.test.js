@@ -12,6 +12,16 @@ var adapter = new GitAdapter(console);
 var tempBase = process.env.BETTERTYPORA_TEST_TMP || os.tmpdir();
 var root = fs.mkdtempSync(path.join(tempBase, "bettertypora-restore-"));
 
+var status = GitAdapter.parseStatus("## main...origin/main [ahead 2, behind 1]\0 M 笔记/中文 文件.md\0R  新文件.md\0旧文件.md\0?? 未跟踪 文件.md\0");
+assert.strictEqual(status.branch, "main", "应解析 NUL 格式的分支信息");
+assert.strictEqual(status.files[0].path, "笔记/中文 文件.md", "中文和空格路径不得被转义");
+assert.deepStrictEqual(status.files[1], { code: "R ", path: "新文件.md", previousPath: "旧文件.md" }, "重命名应保留新旧路径");
+assert.strictEqual(status.files[2].code, "??", "未跟踪文件状态应保持原样");
+
+var commitFiles = GitAdapter.parseCommitFiles("R100\0旧文件.md\0新文件.md\0A\0笔记/新增 文件.md\0");
+assert.deepStrictEqual(commitFiles[0], { code: "R100", path: "新文件.md", previousPath: "旧文件.md" }, "快照重命名应保留新旧路径");
+assert.strictEqual(commitFiles[1].path, "笔记/新增 文件.md", "快照中的中文路径不得损坏");
+
 function cleanup() {
     fs.rmSync(root, { recursive: true, force: true });
 }
@@ -41,6 +51,12 @@ adapter.writeWorktreeFile(root, "笔记/恢复.md", "第一版\n")
     .then(function (result) {
         assert.strictEqual(result.success, true, "删除后的读取不应报错");
         assert.strictEqual(result.missing, true, "删除后的文件应标记为不存在");
+        fs.writeFileSync(path.join(root, "附件.bin"), Buffer.from([0, 1, 2, 3]));
+        return adapter.readWorktreeFile(root, "附件.bin");
+    })
+    .then(function (result) {
+        assert.strictEqual(result.success, true, "应能识别工作区二进制文件");
+        assert.strictEqual(result.binary, true, "二进制文件不得作为 UTF-8 文本处理");
         cleanup();
         console.log("GitAdapter restore tests passed");
     })

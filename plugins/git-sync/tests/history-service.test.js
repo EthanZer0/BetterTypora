@@ -17,6 +17,12 @@ var adapter = {
     revisionWorktreeDiffPatch: function (root, revision, filePath) {
         calls.push(["patch", root, revision, filePath]);
         return Promise.resolve({ success: true, output: "@@ -1 +1 @@\n-快照内容\n+工作区内容" });
+    },
+    commitParent: function () {
+        return Promise.resolve({ success: true, parent: "parent123" });
+    },
+    commitDiffPatch: function () {
+        return Promise.resolve({ success: true, output: "@@ -1 +1 @@\n-父快照\n+快照内容" });
     }
 };
 var service = new HistoryService(adapter, {});
@@ -33,6 +39,21 @@ service.compareSnapshotToWorktree("/repo", "abcdef123", { path: "笔记.md", cod
             ["worktree", "/repo", "笔记.md"],
             ["patch", "/repo", "abcdef123", "笔记.md"]
         ], "应以选中快照到工作区的顺序读取和构造补丁");
+        return service.compareSnapshotFile("/repo", "abcdef123", { path: "笔记.md", code: "M" });
+    })
+    .then(function (model) {
+        assert.strictEqual(model.displayOrder, "reverse", "历史审计模式也应将选中快照显示在左栏");
+        assert.strictEqual(model.modeLabel, "选中快照 · 前一快照", "历史审计模式应有明确标题");
+        var binaryService = new HistoryService({
+            show: function () { return Promise.resolve({ success: true, binary: true, output: "" }); },
+            readWorktreeFile: function () { return Promise.resolve({ success: true, binary: true, output: "" }); },
+            diffPatch: function () { return Promise.resolve({ success: true, output: "Binary files differ" }); }
+        }, {});
+        return binaryService.compareFile("/repo", "附件.png", { code: "M" });
+    })
+    .then(function (model) {
+        assert.strictEqual(model.isBinary, true, "二进制文件应标记为不可行级比较");
+        assert.ok(model.unavailableReason, "二进制文件应返回明确提示");
         console.log("HistoryService comparison tests passed");
     })
     .catch(function (error) {

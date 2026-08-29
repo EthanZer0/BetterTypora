@@ -38,7 +38,7 @@ function makeEngine(options) {
         readSnapshotFile: function () {
             return Promise.resolve(options.deleted
                 ? { success: true, missing: true, output: "" }
-                : { success: true, missing: false, output: "已恢复\n" });
+                : { success: true, missing: false, binary: !!options.binary, output: "已恢复\n" });
         }
     };
     var engine = new SyncEngine(api, adapter, {}, store, history, function () {}, console);
@@ -52,15 +52,20 @@ deleted.engine.restoreSnapshotFile("snapshot", "笔记.md")
         assert.strictEqual(result.success, false, "不能删除当前正在编辑的文件");
         assert.strictEqual(deleted.calls.saved, 0, "拒绝删除前不应额外保存当前文件");
         assert.strictEqual(deleted.calls.removed, 0, "拒绝删除前不应执行删除");
-        var restored = makeEngine({ deleted: false });
-        return restored.engine.restoreSnapshotFile("snapshot", "笔记.md").then(function (result) {
-            assert.strictEqual(result.success, true, "应能恢复快照中的文件");
-            assert.strictEqual(restored.calls.saved, 1, "恢复当前文件前应先保存编辑器内容");
-            assert.strictEqual(restored.calls.written, 1, "应将快照内容写回工作区");
-            assert.strictEqual(restored.calls.content, "已恢复\n", "写回内容必须来自快照");
-            assert.strictEqual(restored.calls.refreshed, 1, "恢复后应刷新 Git 状态");
-            assert.strictEqual(restored.calls.reloaded, 1, "恢复后应重载当前编辑器文件");
-            console.log("SyncEngine restore tests passed");
+        var binary = makeEngine({ binary: true });
+        return binary.engine.restoreSnapshotFile("snapshot", "笔记.md").then(function (result) {
+            assert.strictEqual(result.success, false, "二进制文件不应走 UTF-8 恢复流程");
+            assert.strictEqual(binary.calls.written, 0, "二进制文件不应写回工作区");
+            var restored = makeEngine({ deleted: false });
+            return restored.engine.restoreSnapshotFile("snapshot", "笔记.md").then(function (result) {
+                assert.strictEqual(result.success, true, "应能恢复快照中的文件");
+                assert.strictEqual(restored.calls.saved, 1, "恢复当前文件前应先保存编辑器内容");
+                assert.strictEqual(restored.calls.written, 1, "应将快照内容写回工作区");
+                assert.strictEqual(restored.calls.content, "已恢复\n", "写回内容必须来自快照");
+                assert.strictEqual(restored.calls.refreshed, 1, "恢复后应刷新 Git 状态");
+                assert.strictEqual(restored.calls.reloaded, 1, "恢复后应重载当前编辑器文件");
+                console.log("SyncEngine restore tests passed");
+            });
         });
     })
     .catch(function (error) {

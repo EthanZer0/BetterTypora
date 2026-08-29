@@ -91,6 +91,10 @@
             this.engine.closeSnapshotDetail();
             return;
         }
+        if (action === "snapshot-compare-mode") {
+            this.engine.setSnapshotCompareMode(target.getAttribute("data-mode"));
+            return;
+        }
         if (action === "snapshot-diff-file") {
             this.engine.openSnapshotDiff(target.getAttribute("data-commit"), file).then(function (result) {
                 if (result && result.success) self.close();
@@ -221,15 +225,18 @@
         var detail = state.historyDetail;
         html += "</section><section class=\"bt-git-section bt-git-snapshots\">";
         if (detail) {
+            var compareMode = detail.compareMode === "parent" ? "parent" : "worktree";
+            var comparisonLabel = compareMode === "parent" ? "与前一快照比较" : "与工作区比较";
             html += '<div class="bt-git-section-title bt-git-history-detail-title"><button class="bt-git-history-back" data-action="history-back" title="返回快照列表">‹</button><span>快照详情</span></div>';
             html += '<div class="bt-git-history-detail-meta"><div title="' + this.escapeHtml(detail.message || "") + '">' + this.escapeHtml(detail.message || "快照") + '</div><code>' + this.escapeHtml(String(detail.hash || "").substring(0, 7)) + "</code></div>";
+            html += '<div class="bt-git-compare-mode" role="group" aria-label="快照比较方式"><button type="button" data-action="snapshot-compare-mode" data-mode="worktree"' + (compareMode === "worktree" ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') + ' title="将选中快照与当前工作区比较">与工作区</button><button type="button" data-action="snapshot-compare-mode" data-mode="parent"' + (compareMode === "parent" ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') + ' title="将选中快照与其前一快照比较">与前一快照</button></div>';
             if (!detail.files || !detail.files.length) html += '<div class="bt-git-simple-empty">这个快照没有文件改动</div>';
             else {
                 html += '<div class="bt-git-file-list bt-git-history-file-list">';
                 for (var j = 0; j < detail.files.length; j++) {
                     var historyChange = getFileChange(detail.files[j].code);
                     var historyFile = splitFilePath(detail.files[j].path);
-                    html += '<button type="button" class="bt-git-file bt-git-history-file bt-git-file-' + historyChange.kind + '" data-action="snapshot-diff-file" data-commit="' + this.escapeHtml(detail.hash) + '" data-file="' + this.escapeHtml(detail.files[j].path) + '" title="比较 ' + this.escapeHtml(historyChange.label + " · " + detail.files[j].path) + '"><span class="bt-git-file-status">' + icons.changeIcon(historyChange.kind, 16) + '</span><span class="bt-git-file-text"><span class="bt-git-file-name">' + this.escapeHtml(historyFile.name) + '</span>';
+                    html += '<button type="button" class="bt-git-file bt-git-history-file bt-git-file-' + historyChange.kind + '" data-action="snapshot-diff-file" data-commit="' + this.escapeHtml(detail.hash) + '" data-file="' + this.escapeHtml(detail.files[j].path) + '" title="' + this.escapeHtml(comparisonLabel + " · " + historyChange.label + " · " + detail.files[j].path) + '"><span class="bt-git-file-status">' + icons.changeIcon(historyChange.kind, 16) + '</span><span class="bt-git-file-text"><span class="bt-git-file-name">' + this.escapeHtml(historyFile.name) + '</span>';
                     if (historyFile.directory) html += '<span class="bt-git-file-directory">' + this.escapeHtml(historyFile.directory) + "</span>";
                     html += '</span><span class="bt-git-history-file-open">' + icons.icon("compare", 14) + "</span></button>";
                 }

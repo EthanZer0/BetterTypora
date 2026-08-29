@@ -33,6 +33,17 @@
         });
     }
 
+    function isBinaryComparison(left, right, patch) {
+        return !!(left.binary || right.binary || /(^|\n)(Binary files|GIT binary patch)/.test(String(patch && patch.output || "")));
+    }
+
+    function fileChangeNote(before, after, oldPath, newPath, createdLabel, deletedLabel) {
+        if (oldPath && newPath && oldPath !== newPath) return "已重命名：" + oldPath + " → " + newPath;
+        if (before.missing && !after.missing) return createdLabel;
+        if (!before.missing && after.missing) return deletedLabel;
+        return "";
+    }
+
     /* 构造纯只读比较模型；Git 补丁保持 HEAD → 工作区，展示层反向为“工作区｜HEAD”。 */
     HistoryService.prototype.compareFile = function (root, filePath, fileInfo) {
         var info = fileInfo || {};
@@ -64,9 +75,14 @@
                 beforeMissing: !!left.missing,
                 afterMissing: !!right.missing,
                 changeCode: code,
+                previousPath: oldPath !== filePath ? oldPath : null,
+                isBinary: isBinaryComparison(left, right, patch),
+                unavailableReason: isBinaryComparison(left, right, patch) ? "这是二进制或非文本文件，无法显示行级差异。" : "",
+                changeNote: fileChangeNote(left, right, oldPath, filePath, "工作区新增文件", "工作区已删除文件"),
                 beforeLabel: left.missing ? "HEAD · 不存在" : "HEAD",
                 afterLabel: right.missing ? "工作区 · 已删除" : "工作区",
-                displayOrder: "reverse"
+                displayOrder: "reverse",
+                modeLabel: "工作区 · HEAD"
             };
         });
     };
@@ -113,9 +129,15 @@
                     patch: patch.output || "",
                     beforeMissing: !!left.missing,
                     afterMissing: !!right.missing,
-                    changeCode: info.code || "M",
-                    beforeLabel: left.missing ? "前一快照 · 不存在" : "前一快照 · " + shortParent,
-                    afterLabel: right.missing ? "当前快照 · 已删除" : "当前快照 · " + shortRevision
+                changeCode: info.code || "M",
+                previousPath: oldPath !== newPath ? oldPath : null,
+                isBinary: isBinaryComparison(left, right, patch),
+                unavailableReason: isBinaryComparison(left, right, patch) ? "这是二进制或非文本文件，无法显示行级差异。" : "",
+                changeNote: fileChangeNote(left, right, oldPath, newPath, "选中快照新增文件", "选中快照已删除文件"),
+                beforeLabel: left.missing ? "前一快照 · 不存在" : "前一快照 · " + shortParent,
+                afterLabel: right.missing ? "选中快照 · 已删除" : "选中快照 · " + shortRevision,
+                displayOrder: "reverse",
+                modeLabel: "选中快照 · 前一快照"
                 };
             });
         });
@@ -152,8 +174,13 @@
                 beforeMissing: !!left.missing,
                 afterMissing: !!right.missing,
                 changeCode: info.code || "M",
+                previousPath: null,
+                isBinary: isBinaryComparison(left, right, patch),
+                unavailableReason: isBinaryComparison(left, right, patch) ? "这是二进制或非文本文件，无法显示行级差异。" : "",
+                changeNote: fileChangeNote(left, right, null, filePath, "工作区新增文件", "工作区已删除文件"),
                 beforeLabel: left.missing ? "选中快照 · 已删除" : "选中快照 · " + shortRevision,
-                afterLabel: right.missing ? "工作区 · 已删除" : "工作区"
+                afterLabel: right.missing ? "工作区 · 已删除" : "工作区",
+                modeLabel: "选中快照 · 工作区"
             };
         });
     };

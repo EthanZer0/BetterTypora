@@ -244,7 +244,7 @@
             var commit = null;
             var commits = state.commits || [];
             for (var i = 0; i < commits.length; i++) if (commits[i].hash === revision) commit = commits[i];
-            self.store.update({ historyDetail: { hash: revision, message: commit ? commit.message : "快照 " + String(revision).substring(0, 7), date: commit ? commit.date : "", files: result.files || [] }, error: "" });
+            self.store.update({ historyDetail: { hash: revision, message: commit ? commit.message : "快照 " + String(revision).substring(0, 7), date: commit ? commit.date : "", files: result.files || [], compareMode: "worktree" }, error: "" });
             return { success: true, files: result.files || [] };
         });
     };
@@ -253,7 +253,22 @@
         this.store.update({ historyDetail: null });
     };
 
-    SyncEngine.prototype.openSnapshotDiff = function (revision, filePath) {
+    /* 历史详情中的模式只影响接下来打开的文件比较，不改变快照或工作区内容。 */
+    SyncEngine.prototype.setSnapshotCompareMode = function (mode) {
+        var state = this.store.get();
+        var detail = state.historyDetail;
+        if (!detail) return { success: false, error: "请先打开一个快照详情" };
+        var next = mode === "parent" ? "parent" : "worktree";
+        if (detail.compareMode === next) return { success: true, mode: next };
+        var updated = {};
+        var keys = Object.keys(detail);
+        for (var i = 0; i < keys.length; i++) updated[keys[i]] = detail[keys[i]];
+        updated.compareMode = next;
+        this.store.update({ historyDetail: updated, error: "" });
+        return { success: true, mode: next };
+    };
+
+    SyncEngine.prototype.openSnapshotDiff = function (revision, filePath, mode) {
         var self = this;
         var state = this.store.get();
         var detail = state.historyDetail;
@@ -262,13 +277,21 @@
         var files = detail.files || [];
         for (var i = 0; i < files.length; i++) if (files[i].path === filePath) fileInfo = files[i];
         if (!fileInfo) return Promise.resolve(this._fail("未找到该快照中的文件"));
-        return this.history.compareSnapshotToWorktree(state.root, revision, fileInfo).then(function (result) {
+        var compareMode = mode === "parent" ? "parent" : (detail.compareMode === "parent" ? "parent" : "worktree");
+        var comparison = compareMode === "parent"
+            ? this.history.compareSnapshotFile(state.root, revision, fileInfo)
+            : this.history.compareSnapshotToWorktree(state.root, revision, fileInfo);
+        return comparison.then(function (result) {
             if (!result.success) return self._fail(result.error);
-            result.restore = {
-                revision: revision,
-                filePath: fileInfo.path,
-                mode: result.beforeMissing ? "delete" : "restore"
-            };
+            result.compareMode = compareMode;
+            // 二进制内容不能安全地经 UTF-8 恢复，仍可明确查看其比较状态。
+            if (!result.isBinary) {
+                result.restore = {
+                    revision: revision,
+                    filePath: fileInfo.path,
+                    mode: compareMode === "parent" ? (result.afterMissing ? "delete" : "restore") : (result.beforeMissing ? "delete" : "restore")
+                };
+            }
             var opened = self._openDiffModel(result);
             if (!opened.success) return self._fail(opened.error);
             return result;
@@ -294,6 +317,7 @@
             self.store.update({ phase: "restoring", message: "正在从快照恢复文件…", error: "" });
             return self.history.readSnapshotFile(state.root, revision, fileInfo.path).then(function (snapshot) {
                 if (!snapshot || !snapshot.success) return snapshot;
+                if (snapshot.binary) return self._fail("二进制文件暂不支持恢复，避免损坏原始内容");
                 // Typora 正在编辑的文件不能直接从磁盘删除，否则编辑器内存仍可
                 // 继续保存并重新创建它；要求先切换文档是更安全的原生语义。
                 if (snapshot.missing && reloadCurrent) return self._fail("请先切换至其他文档，再恢复此快照的删除状态");

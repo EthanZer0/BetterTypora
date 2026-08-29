@@ -63,9 +63,8 @@
     };
 
     GitAdapter.prototype.status = function (root) {
-        // Git 默认会把非 ASCII 路径转成八进制转义（例如 \344\270\255），
-        // 这不是文件路径本身；命令级关闭后，Node 可以直接按 UTF-8 接收中文。
-        return this.exec(root, ["-c", "core.quotePath=false", "status", "--porcelain=v1", "-b", "--untracked-files=all"], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }).then(function (result) {
+        // -z 以 NUL 分隔路径，可保留中文、空格、引号和重命名的原始文件名。
+        return this.exec(root, ["-c", "core.quotePath=false", "status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }).then(function (result) {
             if (!result.success) return result;
             return { success: true, status: parseStatus(result.output), output: result.output };
         });
@@ -133,7 +132,7 @@
 
     /* 返回某个快照直接改动过的文件；--root 令第一个提交也能正常列出新增文件。 */
     GitAdapter.prototype.commitFiles = function (root, revision) {
-        return this.exec(root, ["-c", "core.quotePath=false", "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", revision], { timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(function (result) {
+        return this.exec(root, ["-c", "core.quotePath=false", "diff-tree", "--root", "--no-commit-id", "--name-status", "-z", "-r", "-M", revision], { timeout: 30000, maxBuffer: 16 * 1024 * 1024 }).then(function (result) {
             if (!result.success) return result;
             return { success: true, files: parseCommitFiles(result.output) };
         });
@@ -160,7 +159,10 @@
     };
 
     GitAdapter.prototype.show = function (root, revision, filePath) {
-        return this.exec(root, ["show", revision + ":" + filePath], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+        return this.exec(root, ["show", revision + ":" + filePath], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }).then(function (result) {
+            if (result.success) result.binary = isLikelyBinary(result.output);
+            return result;
+        });
     };
 
     /* 统一校验工作区内的相对路径，恢复操作绝不允许越出当前仓库。 */
@@ -178,12 +180,13 @@
             try {
                 var target = resolveWorktreePath(root, filePath);
                 if (!target) return resolve({ success: false, error: "文件路径不在当前工作区内" });
-                fs.readFile(target, "utf8", function (error, content) {
+                fs.readFile(target, function (error, content) {
                     if (error) {
                         if (error.code === "ENOENT") return resolve({ success: true, missing: true, output: "" });
                         return resolve({ success: false, error: error.message || "无法读取工作区文件" });
                     }
-                    resolve({ success: true, missing: false, output: String(content || "") });
+                    if (isLikelyBinary(content)) return resolve({ success: true, missing: false, binary: true, output: "" });
+                    resolve({ success: true, missing: false, binary: false, output: content.toString("utf8") });
                 });
             } catch (e) {
                 resolve({ success: false, error: e.message || "无法读取工作区文件" });
@@ -227,12 +230,12 @@
 
     function parseStatus(output) {
         var result = { branch: "", upstream: "", ahead: 0, behind: 0, files: [] };
-        var lines = (output || "").split("\n");
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            if (!line) continue;
-            if (line.indexOf("## ") === 0) {
-                var header = line.substring(3);
+        var entries = String(output || "").split("\0");
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            if (!entry) continue;
+            if (entry.indexOf("## ") === 0) {
+                var header = entry.substring(3);
                 var tracking = header.indexOf("...");
                 if (tracking >= 0) {
                     result.branch = header.substring(0, tracking);
@@ -245,18 +248,20 @@
                     var noCommit = result.branch.match(/^No commits yet on (.+)$/);
                     if (noCommit) result.branch = noCommit[1];
                 }
-                var ahead = line.match(/ahead (\d+)/);
-                var behind = line.match(/behind (\d+)/);
+                var ahead = entry.match(/ahead (\d+)/);
+                var behind = entry.match(/behind (\d+)/);
                 result.ahead = ahead ? parseInt(ahead[1], 10) : 0;
                 result.behind = behind ? parseInt(behind[1], 10) : 0;
                 continue;
             }
-            if (line.length >= 3) {
-                var code = line.substring(0, 2);
-                var file = line.substring(3);
-                if (file.indexOf('"') === 0) file = file.replace(/^"|"$/g, "");
-                var arrow = file.indexOf(" -> ");
-                result.files.push({ code: code, path: arrow >= 0 ? file.substring(arrow + 4) : file, previousPath: arrow >= 0 ? file.substring(0, arrow) : null });
+            if (entry.length >= 3) {
+                var code = entry.substring(0, 2);
+                var file = entry.substring(3);
+                var renamed = /[RC]/.test(code);
+                // porcelain -z 对重命名按“新路径、旧路径”输出两个连续字段。
+                var previousPath = renamed ? entries[++i] : null;
+                if (!file) continue;
+                result.files.push({ code: code, path: file, previousPath: previousPath || null });
             }
         }
         return result;
@@ -274,19 +279,25 @@
 
     function parseCommitFiles(output) {
         var files = [];
-        var lines = String(output || "").split("\n");
-        for (var i = 0; i < lines.length; i++) {
-            if (!lines[i]) continue;
-            var parts = lines[i].split("\t");
-            var code = parts[0] || "M";
+        var entries = String(output || "").split("\0");
+        for (var i = 0; i < entries.length; i++) {
+            var code = entries[i] || "M";
+            if (!entries[i]) continue;
             var renamed = /^(R|C)/.test(code);
-            var oldPath = renamed ? parts[1] : null;
-            var filePath = renamed ? parts[2] : parts[1];
+            var oldPath = renamed ? entries[++i] : null;
+            var filePath = entries[++i];
             if (!filePath) continue;
             files.push({ code: code, path: filePath, previousPath: oldPath });
         }
         return files;
     }
 
+    function isLikelyBinary(value) {
+        if (typeof Buffer !== "undefined" && Buffer.isBuffer && Buffer.isBuffer(value)) return value.indexOf(0) >= 0;
+        return String(value || "").indexOf("\0") >= 0;
+    }
+
+    GitAdapter.parseStatus = parseStatus;
+    GitAdapter.parseCommitFiles = parseCommitFiles;
     if (typeof module !== "undefined") module.exports = GitAdapter;
 })();

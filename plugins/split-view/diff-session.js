@@ -265,6 +265,8 @@
         this.activeSourceRow = null;
         this.restore = null;
         this.restoreBusy = false;
+        this.changeNote = "";
+        this.unavailableReason = "";
         this._syncing = false;
         this._keydown = null;
         this._dividerDown = null;
@@ -283,20 +285,25 @@
         this.expandedRanges = [];
         this.restore = model.restore || null;
         this.restoreBusy = false;
+        this.changeNote = model.changeNote || "";
+        this.unavailableReason = model.unavailableReason || "";
         var restoreButton = this.restore
             ? '    <button type="button" data-action="restore" title="将此文件恢复到当前工作区">↺</button>'
             : "";
+        var disabled = this.unavailableReason ? " disabled" : "";
+        var modeLabel = model.modeLabel ? '<span class="bt-split-diff-mode">' + escapeHtml(model.modeLabel) + "</span>" : "";
+        var unavailable = this.unavailableReason ? '<div class="bt-split-diff-unavailable">' + escapeHtml(this.unavailableReason) + "</div>" : "";
 
         var root = document.createElement("div");
         root.className = "bt-split-diff-session";
         root.innerHTML =
             '<div class="bt-split-diff-toolbar">' +
-            '  <div class="bt-split-diff-title"><span class="bt-split-diff-glyph">↔</span><span title="' + escapeHtml(model.path) + '">' + escapeHtml(fileName(model.path)) + '</span></div>' +
+            '  <div class="bt-split-diff-title"><span class="bt-split-diff-glyph">↔</span><span title="' + escapeHtml(model.path) + '">' + escapeHtml(fileName(model.path)) + "</span>" + modeLabel + "</div>" +
             '  <div class="bt-split-diff-summary"></div>' +
             '  <div class="bt-split-diff-actions">' +
-            '    <button type="button" data-action="prev" title="上一个改动">↑</button>' +
-            '    <button type="button" data-action="next" title="下一个改动">↓</button>' +
-            '    <button type="button" data-action="show-all" title="显示全部未变化内容">≡</button>' +
+            '    <button type="button" data-action="prev" title="上一个改动"' + disabled + ">↑</button>" +
+            '    <button type="button" data-action="next" title="下一个改动"' + disabled + ">↓</button>" +
+            '    <button type="button" data-action="show-all" title="显示全部未变化内容"' + disabled + ">≡</button>" +
             restoreButton +
             '    <button type="button" data-action="close" title="关闭差异视图">×</button>' +
             "  </div>" +
@@ -305,6 +312,7 @@
             '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(reverseDisplay ? (model.afterLabel || "工作区") : (model.beforeLabel || "HEAD")) + '</div><div class="bt-split-diff-body bt-split-diff-left"></div></section>' +
             '  <div class="bt-split-diff-divider" title="拖动调整左右宽度"></div>' +
             '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(reverseDisplay ? (model.beforeLabel || "HEAD") : (model.afterLabel || "工作区")) + '</div><div class="bt-split-diff-body bt-split-diff-right"></div></section>' +
+            unavailable +
             "</div>" +
             '<div class="bt-split-diff-confirm" hidden><div class="bt-split-diff-confirm-card"><div class="bt-split-diff-confirm-title">恢复此文件？</div><div class="bt-split-diff-confirm-text"></div><div class="bt-split-diff-confirm-error" hidden></div><div class="bt-split-diff-confirm-actions"><button type="button" data-action="cancel-restore">取消</button><button type="button" class="bt-split-diff-confirm-primary" data-action="confirm-restore">确认恢复</button></div></div></div>';
         document.body.appendChild(root);
@@ -383,9 +391,14 @@
         if (!this.el) return;
         var summary = this.el.querySelector(".bt-split-diff-summary");
         if (!summary) return;
+        if (this.unavailableReason) {
+            summary.textContent = "无法显示行级差异";
+            return;
+        }
         var hidden = 0;
         for (var i = 0; i < this.rows.length; i++) if (this.rows[i].fold) hidden += this.rows[i].hiddenCount;
-        summary.textContent = this.changeRows.length + " 处改动" + (hidden ? " · 已折叠 " + hidden + " 行" : "");
+        var changeText = this.changeRows.length + " 处改动" + (hidden ? " · 已折叠 " + hidden + " 行" : "");
+        summary.textContent = this.changeNote ? this.changeNote + " · " + changeText : changeText;
     };
 
     DiffSession.prototype.expandRange = function (start, end) {
@@ -593,6 +606,8 @@
         this.activeSourceRow = null;
         this.restore = null;
         this.restoreBusy = false;
+        this.changeNote = "";
+        this.unavailableReason = "";
         this._keydown = null;
         this._dividerDown = null;
         if (notify !== false) this.onClose();
