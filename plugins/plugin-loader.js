@@ -592,6 +592,7 @@
             getCurrentFile: window.BetterTypora.getCurrentFile,
             getMountFolder: window.BetterTypora.getMountFolder,
             openFile: window.BetterTypora.openFile,
+            reloadFile: window.BetterTypora.reloadFile,
             isDocumentEdited: window.BetterTypora.isDocumentEdited,
             // 工具
             escapeHtml: window.BetterTypora.escapeHtml,
@@ -1516,6 +1517,23 @@
             }
         };
 
+        /* 强制重新读取指定文件；用于外部写入后使当前 Typora 编辑器与磁盘一致。 */
+        var _btReloadFile = function (filePath) {
+            var target = filePath || _btGetCurrentFile();
+            if (!target) return false;
+            try {
+                if (typeof File !== "undefined" && typeof File.loadFile === "function") {
+                    File.loadFile(target);
+                    return true;
+                }
+                _btOpenFile(target);
+                return true;
+            } catch (e) {
+                systemLogger.warn("reloadFile:", e.message);
+                return false;
+            }
+        };
+
         var _btIsDocumentEdited = function () {
             try {
                 if (typeof File !== "undefined" && typeof File.isDocumentEdited === "function") {
@@ -2291,6 +2309,7 @@
             getCurrentFile: _btGetCurrentFile,
             getMountFolder: _btGetMountFolder,
             openFile: _btOpenFile,
+            reloadFile: _btReloadFile,
             isDocumentEdited: _btIsDocumentEdited,
 
             // 工具

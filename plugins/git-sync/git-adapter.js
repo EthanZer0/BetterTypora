@@ -116,6 +116,13 @@
         return this.exec(root, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
     };
 
+    /* 从指定快照到当前工作区的零上下文 patch，供“快照｜工作区”比较使用。 */
+    GitAdapter.prototype.revisionWorktreeDiffPatch = function (root, revision, filePath) {
+        var args = ["-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-color", "--unified=0", "--find-renames", revision, "--"];
+        if (filePath) args.push(filePath);
+        return this.exec(root, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    };
+
     GitAdapter.prototype.log = function (root, limit) {
         return this.exec(root, ["-c", "core.quotePath=false", "log", "-n", String(limit || 20), "--date=iso", "--pretty=format:%H%x1f%an%x1f%ad%x1f%s"], { timeout: 30000, maxBuffer: 8 * 1024 * 1024 }).then(function (r) {
             if (!r.success) return r;
@@ -156,10 +163,21 @@
         return this.exec(root, ["show", revision + ":" + filePath], { timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
     };
 
+    /* 统一校验工作区内的相对路径，恢复操作绝不允许越出当前仓库。 */
+    function resolveWorktreePath(root, filePath) {
+        if (!root || !filePath) return null;
+        var base = path.resolve(root);
+        var target = path.resolve(base, String(filePath));
+        var relative = path.relative(base, target);
+        if (!relative || relative === ".." || relative.indexOf(".." + path.sep) === 0 || path.isAbsolute(relative)) return null;
+        return target;
+    }
+
     GitAdapter.prototype.readWorktreeFile = function (root, filePath) {
         return new Promise(function (resolve) {
             try {
-                var target = path.resolve(root, filePath);
+                var target = resolveWorktreePath(root, filePath);
+                if (!target) return resolve({ success: false, error: "文件路径不在当前工作区内" });
                 fs.readFile(target, "utf8", function (error, content) {
                     if (error) {
                         if (error.code === "ENOENT") return resolve({ success: true, missing: true, output: "" });
@@ -170,6 +188,40 @@
             } catch (e) {
                 resolve({ success: false, error: e.message || "无法读取工作区文件" });
             }
+        });
+    };
+
+    /* 同目录临时文件 + rename，避免恢复途中留下半写入的 Markdown 文件。 */
+    GitAdapter.prototype.writeWorktreeFile = function (root, filePath, content) {
+        return new Promise(function (resolve) {
+            var target = resolveWorktreePath(root, filePath);
+            if (!target) return resolve({ success: false, error: "文件路径不在当前工作区内" });
+            var temp = target + ".bettertypora-restore-" + Date.now() + "-" + Math.floor(Math.random() * 1000000);
+            fs.mkdir(path.dirname(target), { recursive: true }, function (mkdirError) {
+                if (mkdirError) return resolve({ success: false, error: mkdirError.message || "无法创建目标目录" });
+                fs.writeFile(temp, String(content == null ? "" : content), "utf8", function (writeError) {
+                    if (writeError) return resolve({ success: false, error: writeError.message || "无法写入恢复文件" });
+                    fs.rename(temp, target, function (renameError) {
+                        if (!renameError) return resolve({ success: true, path: target });
+                        fs.unlink(temp, function () {
+                            resolve({ success: false, error: renameError.message || "无法替换工作区文件" });
+                        });
+                    });
+                });
+            });
+        });
+    };
+
+    /* 仅删除单个文件；目录、工作区根目录和越界路径都会被拒绝。 */
+    GitAdapter.prototype.removeWorktreeFile = function (root, filePath) {
+        return new Promise(function (resolve) {
+            var target = resolveWorktreePath(root, filePath);
+            if (!target) return resolve({ success: false, error: "文件路径不在当前工作区内" });
+            fs.unlink(target, function (error) {
+                if (!error) return resolve({ success: true, path: target, missing: false });
+                if (error.code === "ENOENT") return resolve({ success: true, path: target, missing: true });
+                resolve({ success: false, error: error.message || "无法删除工作区文件" });
+            });
         });
     };
 

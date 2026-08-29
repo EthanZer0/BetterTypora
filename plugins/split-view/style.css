@@ -303,6 +303,18 @@ body.unibody-window .bt-tabbar-floating {
 .bt-split-diff-row.is-fold { display: block; border-top: 1px solid color-mix(in srgb, var(--window-border, #ddd) 54%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--window-border, #ddd) 54%, transparent); background: color-mix(in srgb, var(--control-hover-bg-color, rgba(127,127,127,.1)) 65%, transparent); }
 .bt-split-diff-fold-button { display: block; width: 100%; height: 20px; padding: 0 12px; border: 0; background: transparent; color: var(--secondary-text-color, var(--text-color, #777)); cursor: pointer; font: 11px/20px var(--font-sans, system-ui, -apple-system, sans-serif); letter-spacing: .01em; text-align: center; transition: background-color .15s ease, color .15s ease; }
 .bt-split-diff-fold-button:hover { background: var(--control-hover-bg-color, rgba(127,127,127,.14)); color: var(--text-color, #333); }
+.bt-split-diff-confirm { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 20px; background: color-mix(in srgb, var(--bg-color, #fff) 35%, rgba(0,0,0,.45)); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); box-sizing: border-box; }
+.bt-split-diff-confirm[hidden] { display: none !important; }
+.bt-split-diff-confirm-card { width: min(390px, 100%); padding: 18px; border: 1px solid var(--window-border, rgba(128,128,128,.24)); border-radius: 10px; background: var(--side-bar-bg-color, var(--bg-color, #fff)); box-shadow: 0 16px 42px rgba(0,0,0,.18); color: var(--text-color, #333); }
+.bt-split-diff-confirm-title { font-size: 14px; font-weight: 650; }
+.bt-split-diff-confirm-text { margin-top: 9px; color: var(--secondary-text-color, var(--text-color, #666)); font-size: 12px; line-height: 1.6; }
+.bt-split-diff-confirm-error { margin-top: 10px; color: var(--danger-color, #b44); font-size: 11px; line-height: 1.5; }
+.bt-split-diff-confirm-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 16px; }
+.bt-split-diff-confirm-actions button { min-width: 66px; height: 28px; padding: 0 10px; border: 1px solid var(--window-border, rgba(128,128,128,.24)); border-radius: 6px; background: transparent; color: var(--text-color, #333); cursor: pointer; font: 12px var(--font-sans, system-ui, -apple-system, sans-serif); transition: background-color .15s ease, transform .15s ease; }
+.bt-split-diff-confirm-actions button:hover { background: var(--control-hover-bg-color, rgba(128,128,128,.12)); }
+.bt-split-diff-confirm-actions button:active { transform: scale(.97); }
+.bt-split-diff-confirm-actions .bt-split-diff-confirm-primary { border-color: var(--active-file-text-color, #468); background: var(--active-file-text-color, #468); color: var(--bg-color, #fff); }
+.bt-split-diff-confirm-actions .bt-split-diff-confirm-primary:disabled { cursor: wait; opacity: .65; }
 @media (max-width: 620px) {
     .bt-split-diff-pane { min-width: 180px; }
     .bt-split-diff-line-number { padding-right: 6px; }

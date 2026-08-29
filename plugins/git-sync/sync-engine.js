@@ -262,11 +262,61 @@
         var files = detail.files || [];
         for (var i = 0; i < files.length; i++) if (files[i].path === filePath) fileInfo = files[i];
         if (!fileInfo) return Promise.resolve(this._fail("未找到该快照中的文件"));
-        return this.history.compareSnapshotFile(state.root, revision, fileInfo).then(function (result) {
+        return this.history.compareSnapshotToWorktree(state.root, revision, fileInfo).then(function (result) {
             if (!result.success) return self._fail(result.error);
+            result.restore = {
+                revision: revision,
+                filePath: fileInfo.path,
+                mode: result.beforeMissing ? "delete" : "restore"
+            };
             var opened = self._openDiffModel(result);
             if (!opened.success) return self._fail(opened.error);
             return result;
+        });
+    };
+
+    /*
+     * 确认已由 DiffSession 完成后才会调用本方法。
+     * 写入前保存当前活动文档，写入后强制重载，避免内存中的编辑器内容
+     * 与磁盘文件分叉；恢复本身不创建提交也不触发同步。
+     */
+    SyncEngine.prototype.restoreSnapshotFile = function (revision, filePath) {
+        var self = this;
+        return this.enqueue(function () {
+            var state = self.store.get();
+            var detail = state.historyDetail;
+            if (!state.root || !detail || detail.hash !== revision) return self._fail("快照详情已失效，请重新打开");
+            var fileInfo = findSnapshotFile(detail.files || [], filePath);
+            if (!fileInfo) return self._fail("未找到该快照中的文件");
+            var target = path.resolve(state.root, fileInfo.path);
+            var currentFile = self.api.getCurrentFile ? self.api.getCurrentFile() : state.currentFile;
+            var reloadCurrent = samePath(currentFile, target);
+            self.store.update({ phase: "restoring", message: "正在从快照恢复文件…", error: "" });
+            return self.history.readSnapshotFile(state.root, revision, fileInfo.path).then(function (snapshot) {
+                if (!snapshot || !snapshot.success) return snapshot;
+                // Typora 正在编辑的文件不能直接从磁盘删除，否则编辑器内存仍可
+                // 继续保存并重新创建它；要求先切换文档是更安全的原生语义。
+                if (snapshot.missing && reloadCurrent) return self._fail("请先切换至其他文档，再恢复此快照的删除状态");
+                var saveCurrent = reloadCurrent ? self._saveAndWait() : Promise.resolve({ success: true });
+                return saveCurrent.then(function (saved) {
+                    if (!saved.success) return self._fail("当前文档未能保存，已取消恢复");
+                    var operation = snapshot.missing
+                        ? self.adapter.removeWorktreeFile(state.root, fileInfo.path)
+                        : self.adapter.writeWorktreeFile(state.root, fileInfo.path, snapshot.output || "");
+                    return operation.then(function (written) {
+                        if (!written.success) return self._fail(written.error || "无法恢复快照文件");
+                        return self._refresh().then(function () {
+                            if (reloadCurrent) self._reloadFile(target);
+                            var action = snapshot.missing ? "已按快照删除文件" : "已从快照恢复文件";
+                            self.store.update({ phase: "restored", message: action, error: "" });
+                            return { success: true, deleted: !!snapshot.missing, path: fileInfo.path };
+                        });
+                    });
+                });
+            }).then(function (result) {
+                if (!result || !result.success) return result && result.error ? result : self._fail("恢复快照失败");
+                return result;
+            }).catch(function (error) { return self._fail(error.message || "恢复快照失败"); });
         });
     };
 
@@ -276,6 +326,16 @@
         }
         var opened = window.BetterTypora.commands.execute("split-view:open-diff", model);
         return opened === false ? { success: false, error: "无法打开差异视图" } : { success: true };
+    };
+
+    SyncEngine.prototype._reloadFile = function (filePath) {
+        try {
+            if (this.api.reloadFile && this.api.reloadFile(filePath)) return true;
+            if (this.api.openFile) this.api.openFile(filePath);
+        } catch (e) {
+            this.logger.warn("恢复后重载文档失败", e);
+        }
+        return false;
     };
 
     SyncEngine.prototype.loadHistory = function () {
@@ -309,6 +369,18 @@
     function defaultMessage(currentFile) {
         var name = currentFile ? path.basename(currentFile) : "笔记";
         return "notes: 保存「" + name + "」";
+    }
+
+    function findSnapshotFile(files, filePath) {
+        for (var i = 0; i < files.length; i++) if (files[i].path === filePath) return files[i];
+        return null;
+    }
+
+    function samePath(left, right) {
+        if (!left || !right) return false;
+        var a = path.resolve(String(left));
+        var b = path.resolve(String(right));
+        return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
     }
 
     function formatGitError(error) {

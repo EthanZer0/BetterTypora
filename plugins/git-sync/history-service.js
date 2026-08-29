@@ -33,7 +33,7 @@
         });
     }
 
-    /* 构造纯只读比较模型：旧版本来自 HEAD，右侧始终是工作区落盘内容。 */
+    /* 构造纯只读比较模型；Git 补丁保持 HEAD → 工作区，展示层反向为“工作区｜HEAD”。 */
     HistoryService.prototype.compareFile = function (root, filePath, fileInfo) {
         var info = fileInfo || {};
         var oldPath = info.previousPath || filePath;
@@ -65,7 +65,8 @@
                 afterMissing: !!right.missing,
                 changeCode: code,
                 beforeLabel: left.missing ? "HEAD · 不存在" : "HEAD",
-                afterLabel: right.missing ? "工作区 · 已删除" : "工作区"
+                afterLabel: right.missing ? "工作区 · 已删除" : "工作区",
+                displayOrder: "reverse"
             };
         });
     };
@@ -73,6 +74,11 @@
     /* 读取快照详情时只返回该提交的直接变更，不扫描整个仓库。 */
     HistoryService.prototype.loadCommitFiles = function (root, revision) {
         return this.adapter.commitFiles(root, revision);
+    };
+
+    /* 恢复使用的目标快照文件内容；文件在目标快照中不存在时标记为 missing。 */
+    HistoryService.prototype.readSnapshotFile = function (root, revision, filePath) {
+        return revisionFile(this.adapter, root, revision, filePath);
     };
 
     /* 构造“父快照 → 当前快照”的只读文件比较模型。 */
@@ -112,6 +118,43 @@
                     afterLabel: right.missing ? "当前快照 · 已删除" : "当前快照 · " + shortRevision
                 };
             });
+        });
+    };
+
+    /*
+     * 历史面板的默认入口：以用户选中的快照为左栏主体，当前工作区为右栏参照。
+     * “父快照 → 当前快照”仍由 compareSnapshotFile 保留，作为后续的审计型入口。
+     */
+    HistoryService.prototype.compareSnapshotToWorktree = function (root, revision, fileInfo) {
+        var info = fileInfo || {};
+        var filePath = info.path;
+        var self = this;
+        if (!filePath) return Promise.resolve({ success: false, error: "未指定快照文件" });
+        return Promise.all([
+            revisionFile(this.adapter, root, revision, filePath),
+            this.adapter.readWorktreeFile(root, filePath),
+            this.adapter.revisionWorktreeDiffPatch(root, revision, filePath)
+        ]).then(function (results) {
+            var left = results[0];
+            var right = results[1];
+            var patch = results[2];
+            if (!left.success) return { success: false, error: left.error || "无法读取选中快照" };
+            if (!right.success) return { success: false, error: right.error || "无法读取工作区版本" };
+            if (!patch.success) return { success: false, error: patch.error || "无法读取 Git 差异" };
+            var shortRevision = String(revision).substring(0, 7);
+            return {
+                success: true,
+                root: root,
+                path: filePath,
+                beforeText: left.output || "",
+                afterText: right.output || "",
+                patch: patch.output || "",
+                beforeMissing: !!left.missing,
+                afterMissing: !!right.missing,
+                changeCode: info.code || "M",
+                beforeLabel: left.missing ? "选中快照 · 已删除" : "选中快照 · " + shortRevision,
+                afterLabel: right.missing ? "工作区 · 已删除" : "工作区"
+            };
         });
     };
 

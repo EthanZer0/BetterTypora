@@ -150,6 +150,22 @@
     }
 
     /*
+     * Git patch 必须按“旧 → 新”构造行模型；展示层可在不破坏 hunk、行号和
+     * 折叠计算的前提下交换左右栏，用于“用户选择的主体｜参照版本”。
+     */
+    function swapRows(rows) {
+        var swapped = [];
+        for (var i = 0; i < rows.length; i++) {
+            swapped.push({
+                left: rows[i].right,
+                right: rows[i].left,
+                change: rows[i].change
+            });
+        }
+        return swapped;
+    }
+
+    /*
      * 将长的未变化区间收起为一行占位。完整行模型仍保留在内存中，
      * 因此展开后行号和导航目标不会重新计算或产生跳变。
      */
@@ -247,6 +263,8 @@
         this.contextLines = 3;
         this.changeIndex = -1;
         this.activeSourceRow = null;
+        this.restore = null;
+        this.restoreBusy = false;
         this._syncing = false;
         this._keydown = null;
         this._dividerDown = null;
@@ -259,8 +277,15 @@
     DiffSession.prototype.open = function (model) {
         this.close(false);
         this.allRows = buildRows(model.beforeText, model.afterText, model.patch);
+        var reverseDisplay = model.displayOrder === "reverse";
+        if (reverseDisplay) this.allRows = swapRows(this.allRows);
         this.rows = [];
         this.expandedRanges = [];
+        this.restore = model.restore || null;
+        this.restoreBusy = false;
+        var restoreButton = this.restore
+            ? '    <button type="button" data-action="restore" title="将此文件恢复到当前工作区">↺</button>'
+            : "";
 
         var root = document.createElement("div");
         root.className = "bt-split-diff-session";
@@ -272,14 +297,16 @@
             '    <button type="button" data-action="prev" title="上一个改动">↑</button>' +
             '    <button type="button" data-action="next" title="下一个改动">↓</button>' +
             '    <button type="button" data-action="show-all" title="显示全部未变化内容">≡</button>' +
+            restoreButton +
             '    <button type="button" data-action="close" title="关闭差异视图">×</button>' +
             "  </div>" +
             "</div>" +
             '<div class="bt-split-diff-columns">' +
-            '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(model.beforeLabel || "HEAD") + '</div><div class="bt-split-diff-body bt-split-diff-left"></div></section>' +
+            '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(reverseDisplay ? (model.afterLabel || "工作区") : (model.beforeLabel || "HEAD")) + '</div><div class="bt-split-diff-body bt-split-diff-left"></div></section>' +
             '  <div class="bt-split-diff-divider" title="拖动调整左右宽度"></div>' +
-            '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(model.afterLabel || "工作区") + '</div><div class="bt-split-diff-body bt-split-diff-right"></div></section>' +
-            "</div>";
+            '  <section class="bt-split-diff-pane"><div class="bt-split-diff-pane-title">' + escapeHtml(reverseDisplay ? (model.beforeLabel || "HEAD") : (model.afterLabel || "工作区")) + '</div><div class="bt-split-diff-body bt-split-diff-right"></div></section>' +
+            "</div>" +
+            '<div class="bt-split-diff-confirm" hidden><div class="bt-split-diff-confirm-card"><div class="bt-split-diff-confirm-title">恢复此文件？</div><div class="bt-split-diff-confirm-text"></div><div class="bt-split-diff-confirm-error" hidden></div><div class="bt-split-diff-confirm-actions"><button type="button" data-action="cancel-restore">取消</button><button type="button" class="bt-split-diff-confirm-primary" data-action="confirm-restore">确认恢复</button></div></div></div>';
         document.body.appendChild(root);
         this.el = root;
         this.left = root.querySelector(".bt-split-diff-left");
@@ -388,6 +415,76 @@
         }
     };
 
+    DiffSession.prototype.showRestoreConfirm = function () {
+        if (!this.restore || !this.el) return;
+        var dialog = this.el.querySelector(".bt-split-diff-confirm");
+        var text = this.el.querySelector(".bt-split-diff-confirm-text");
+        if (!dialog || !text) return;
+        var error = this.el.querySelector(".bt-split-diff-confirm-error");
+        var button = this.el.querySelector('[data-action="confirm-restore"]');
+        this.restoreBusy = false;
+        if (error) {
+            error.hidden = true;
+            error.textContent = "";
+        }
+        if (button) {
+            button.disabled = false;
+            button.textContent = "确认恢复";
+        }
+        var name = fileName(this.restore.filePath);
+        text.textContent = this.restore.mode === "delete"
+            ? "该快照中「" + name + "」已被删除。确认后将从当前工作区删除此文件。"
+            : "确认后将用该快照中的「" + name + "」替换当前工作区版本。当前未提交改动会被覆盖。";
+        dialog.hidden = false;
+    };
+
+    DiffSession.prototype.hideRestoreConfirm = function () {
+        if (!this.el) return;
+        var dialog = this.el.querySelector(".bt-split-diff-confirm");
+        if (dialog) dialog.hidden = true;
+    };
+
+    DiffSession.prototype.confirmRestore = function () {
+        var self = this;
+        if (!this.restore || this.restoreBusy) return;
+        var registry = window.BetterTypora && window.BetterTypora.commands;
+        if (!registry || !registry.has || !registry.has("git-sync:restore-snapshot-file")) {
+            this.setRestoreError("Git 恢复功能不可用");
+            return;
+        }
+        this.restoreBusy = true;
+        var button = this.el.querySelector('[data-action="confirm-restore"]');
+        if (button) {
+            button.disabled = true;
+            button.textContent = "正在恢复…";
+        }
+        var result = registry.execute("git-sync:restore-snapshot-file", this.restore.revision, this.restore.filePath);
+        Promise.resolve(result).then(function (restored) {
+            if (restored && restored.success) {
+                self.close(false);
+                return;
+            }
+            self.setRestoreError(restored && restored.error ? restored.error : "恢复失败，请重试");
+        }).catch(function (error) {
+            self.setRestoreError(error && error.message ? error.message : "恢复失败，请重试");
+        });
+    };
+
+    DiffSession.prototype.setRestoreError = function (message) {
+        if (!this.el) return;
+        this.restoreBusy = false;
+        var error = this.el.querySelector(".bt-split-diff-confirm-error");
+        var button = this.el.querySelector('[data-action="confirm-restore"]');
+        if (error) {
+            error.textContent = message;
+            error.hidden = false;
+        }
+        if (button) {
+            button.disabled = false;
+            button.textContent = "确认恢复";
+        }
+    };
+
     DiffSession.prototype.bind = function () {
         var self = this;
         this.left.addEventListener("scroll", function () { self.syncScroll(self.left, self.right); }, { passive: true });
@@ -402,6 +499,9 @@
             else if (action === "next") self.goTo(self.changeIndex + 1);
             else if (action === "show-all") self.showAll();
             else if (action === "expand") self.expandRange(parseInt(target.getAttribute("data-start"), 10), parseInt(target.getAttribute("data-end"), 10));
+            else if (action === "restore") self.showRestoreConfirm();
+            else if (action === "cancel-restore") self.hideRestoreConfirm();
+            else if (action === "confirm-restore") self.confirmRestore();
         });
         this._keydown = function (event) {
             if (!self.el) return;
@@ -491,12 +591,15 @@
         this.expandedRanges = [];
         this.changeIndex = -1;
         this.activeSourceRow = null;
+        this.restore = null;
+        this.restoreBusy = false;
         this._keydown = null;
         this._dividerDown = null;
         if (notify !== false) this.onClose();
     };
 
     DiffSession.buildRows = buildRows;
+    DiffSession.swapRows = swapRows;
     DiffSession.foldRows = foldRows;
     DiffSession.parseHunks = parseHunks;
     if (typeof module !== "undefined") module.exports = DiffSession;

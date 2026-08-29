@@ -136,6 +136,7 @@ BetterTypora.saveFileAndWait()   // → Promise, 触发保存并等待写盘完�
 BetterTypora.getCurrentFile()    // → string | null  当前编辑文件的绝对路径
 BetterTypora.getMountFolder()    // → string | null  打开的工作区根目录
 BetterTypora.openFile(path)      // → 切换到指定文件
+BetterTypora.reloadFile(path)    // → 重新从磁盘读取指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 
 // 工具
@@ -311,6 +312,7 @@ var BT = require("bettertypora:api");
 // BT.getCurrentFile → function  返回当前编辑文件路径 (string | null)
 // BT.getMountFolder → function  返回打开的工作区根目录 (string | null)
 // BT.openFile       → function  切换到指定文件
+// BT.reloadFile     → function  重新从磁盘读取指定文件
 // BT.isDocumentEdited → function  返回当前文档是否有未保存更改 (bool)
 // BT.escapeHtml     → function  防 XSS 转义 (与 BetterTypora.escapeHtml 一致)
 // BT.onFileOpen     → function  订阅文件打开 (fn(filePath)), 返回取消函数

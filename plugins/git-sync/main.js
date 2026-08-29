@@ -58,6 +58,7 @@ module.exports = {
         api.registerCommand("fetch", function () { return engine.fetch(); }, "获取远程仓库状态");
         api.registerCommand("show-diff", function () { return engine.openDiff(); }, "在双栏视图中比较当前文档差异");
         api.registerCommand("show-history", function () { panel.open(); return engine.loadHistory(); }, "查看 Git 快照历史");
+        api.registerCommand("restore-snapshot-file", function (revision, filePath) { return engine.restoreSnapshotFile(revision, filePath); }, "将单个文件恢复到指定 Git 快照");
 
         addUnsubscriber(BT.onFileEvent("opened", function () {
             engine.refresh();

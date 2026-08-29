@@ -135,6 +135,7 @@ BetterTypora.saveFile()          // → trigger save of the current document (sa
 BetterTypora.getCurrentFile()    // → string | null  absolute path of the current file
 BetterTypora.getMountFolder()    // → string | null  opened workspace root
 BetterTypora.openFile(path)      // → switch to the given file
+BetterTypora.reloadFile(path)    // → reload the given file from disk
 BetterTypora.isDocumentEdited()  // → bool  whether the current document has unsaved changes
 
 // Utilities
@@ -306,6 +307,7 @@ var BT = require("bettertypora:api");
 // BT.getCurrentFile → function  current file path (string | null)
 // BT.getMountFolder → function  opened workspace root (string | null)
 // BT.openFile       → function  switch to the given file
+// BT.reloadFile     → function  reload the given file from disk
 // BT.isDocumentEdited → function  whether the current document has unsaved changes (bool)
 // BT.escapeHtml     → function  XSS-safe escaping (same as BetterTypora.escapeHtml)
 // BT.onFileOpen     → function  subscribe to file open (fn(filePath)), returns unsubscribe

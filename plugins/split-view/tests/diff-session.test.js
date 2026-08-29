@@ -61,7 +61,18 @@ function testBoundaryChangesAndNoChange() {
     assert.strictEqual(noChange[0].fold, undefined, "无差异行不应带折叠标记");
 }
 
+function testDisplayDirection() {
+    var rows = DiffSession.buildRows("旧内容\n", "新内容\n", "@@ -1 +1 @@\n-旧内容\n+新内容");
+    var reversed = DiffSession.swapRows(rows);
+
+    assert.strictEqual(rows[0].left.text, "旧内容", "Git 行模型左栏应保持旧版本");
+    assert.strictEqual(rows[0].right.text, "新内容", "Git 行模型右栏应保持新版本");
+    assert.strictEqual(reversed[0].left.text, "新内容", "反向展示时左栏应为用户选择的主体");
+    assert.strictEqual(reversed[0].right.text, "旧内容", "反向展示时右栏应为参照版本");
+}
+
 testLargeFileFolding();
 testExpandAndShowAll();
 testBoundaryChangesAndNoChange();
+testDisplayDirection();
 console.log("DiffSession tests passed");
