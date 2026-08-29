@@ -132,7 +132,10 @@
                 });
             }).then(function (result) {
                 if (!result.success) return self._fail(formatGitError(result.error));
-                if (result.imported && result.managedFile && self.api.openFile) self.api.openFile(result.managedFile);
+                if (result.imported && result.managedFile) {
+                    var opener = self.api.openFileInCurrentWindow || self.api.openFile;
+                    if (opener) opener(result.managedFile);
+                }
                 return self._refresh().then(function () {
                     self.store.update({ message: result.imported ? "已复制当前笔记到统一仓库，原文件未改动" : "已加入统一笔记仓库", error: "" });
                     return result;
@@ -487,7 +490,8 @@
     SyncEngine.prototype._reloadFile = function (filePath) {
         try {
             if (this.api.reloadFile && this.api.reloadFile(filePath)) return true;
-            if (this.api.openFile) this.api.openFile(filePath);
+            var opener = this.api.openFileInCurrentWindow || this.api.openFile;
+            if (opener) opener(filePath);
         } catch (e) {
             this.logger.warn("恢复后重载文档失败", e);
         }

@@ -59,6 +59,12 @@ var _guardInterval = null;
 var _initialized = false;
 var _timers = null;
 
+/* 文件导航应复用当前 Typora 窗口；旧 API 仍作为兼容降级。 */
+function openInCurrentWindow(filePath) {
+    var opener = BetterTypora.openFileInCurrentWindow || BetterTypora.openFile;
+    return opener ? opener(filePath) : false;
+}
+
 // ===================================================================
 // 工具函数
 // ===================================================================
@@ -463,7 +469,7 @@ function handleWikiLinkClick(e) {
     // 打开目标文件（自引用跳过，只做锚点滚动）
     if (!isSelfRef) {
         try {
-            BetterTypora.openFile(resolvedPath);
+            openInCurrentWindow(resolvedPath);
         } catch (err) {
             logger.error("打开文件失败:", err.message);
         }
@@ -815,7 +821,7 @@ module.exports = {
         backlinksPanel = new BacklinksPanel(
             linkIndex, resolver, fs, path,
             function (filePath) {
-                BetterTypora.openFile(filePath);
+                openInCurrentWindow(filePath);
             },
             getCurrentFilePath
         );
@@ -859,7 +865,7 @@ module.exports = {
         // 6. 创建知识图谱视图（不挂载 DOM）
         if (!graphView) {
             graphView = new GraphView(linkIndex, resolver, function (filePath) {
-                BetterTypora.openFile(filePath);
+                openInCurrentWindow(filePath);
             }, PLUGIN_DIR);
         }
         api.registerCommand("graph-view", function () {
@@ -877,7 +883,7 @@ module.exports = {
         api.registerCommand("embed-graph", function (container) {
             if (!graphView) {
                 graphView = new GraphView(linkIndex, resolver, function (filePath) {
-                    BetterTypora.openFile(filePath);
+                    openInCurrentWindow(filePath);
                 }, PLUGIN_DIR);
             }
             if (container) graphView.open(container);

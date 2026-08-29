@@ -108,7 +108,8 @@
             return;
         }
         if (file && state.root) {
-            if (this.api.openFile) this.api.openFile(path.join(state.root, file));
+            var opener = this.api.openFileInCurrentWindow || this.api.openFile;
+            if (opener) opener(path.join(state.root, file));
             return;
         }
         if (action === "close") this.close();

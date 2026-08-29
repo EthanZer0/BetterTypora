@@ -592,6 +592,7 @@
             getCurrentFile: window.BetterTypora.getCurrentFile,
             getMountFolder: window.BetterTypora.getMountFolder,
             openFile: window.BetterTypora.openFile,
+            openFileInCurrentWindow: window.BetterTypora.openFileInCurrentWindow,
             reloadFile: window.BetterTypora.reloadFile,
             isDocumentEdited: window.BetterTypora.isDocumentEdited,
             // 工具
@@ -1510,11 +1511,30 @@
             try {
                 if (typeof File !== "undefined" && File.editor && File.editor.library
                     && typeof File.editor.library.openFile === "function") {
-                    File.editor.library.openFile(filePath);
+                    return File.editor.library.openFile(filePath);
                 }
             } catch (e) {
                 systemLogger.warn("openFile:", e.message);
             }
+            return false;
+        };
+
+        /*
+         * 当前窗口切换：File.loadFile 在当前 Typora 版本中是“重载当前文档”
+         * 的入口，传入其他路径时不会真正切换页面。跨文件切换仍须使用
+         * File.editor.library.openFile；本地链接由 tabs 在 click 捕获阶段接管，
+         * 因此不会再落入 Typora 默认的多窗口链接行为。
+         * 保留 openFile 原语义，避免破坏其他插件，新增明确的 API 供 tabs/
+         * 本地链接使用。
+         */
+        var _btOpenFileInCurrentWindow = function (filePath) {
+            if (!filePath) return false;
+            try {
+                return _btOpenFile(filePath) !== false;
+            } catch (e) {
+                systemLogger.warn("openFileInCurrentWindow:", e.message);
+            }
+            return false;
         };
 
         /* 强制重新读取指定文件；用于外部写入后使当前 Typora 编辑器与磁盘一致。 */
@@ -2309,6 +2329,7 @@
             getCurrentFile: _btGetCurrentFile,
             getMountFolder: _btGetMountFolder,
             openFile: _btOpenFile,
+            openFileInCurrentWindow: _btOpenFileInCurrentWindow,
             reloadFile: _btReloadFile,
             isDocumentEdited: _btIsDocumentEdited,
 

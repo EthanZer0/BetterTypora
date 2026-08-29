@@ -71,6 +71,22 @@ function tabsCmd(cmd) {
     }
 }
 
+function hasTabsCmd(cmd) {
+    try {
+        return !!(window.BetterTypora.commands &&
+            typeof window.BetterTypora.commands.has === "function" &&
+            window.BetterTypora.commands.has("tabs:" + cmd));
+    } catch (e) {
+        return false;
+    }
+}
+
+/* 分屏内部的文档迁移必须留在当前 Typora 窗口。 */
+function openInCurrentWindow(filePath) {
+    var opener = BetterTypora.openFileInCurrentWindow || BetterTypora.openFile;
+    return opener ? opener(filePath) : false;
+}
+
 /* ------------------------------------------------------------------ */
 /* Git Diff 会话                                                       */
 /* ------------------------------------------------------------------ */
@@ -342,7 +358,7 @@ function applyRightPane() {
             var lf = _leftPreviewPath;
             if (lf && lf !== BetterTypora.getCurrentFile()) {
                 _pendingSide = "left";
-                BetterTypora.openFile(lf);
+                openInCurrentWindow(lf);
             } else {
                 doActivate("left");
             }
@@ -353,7 +369,7 @@ function applyRightPane() {
     // 文件条目: 图谱面板卸载
     unmountGraphPane();
     if (_activeSide === "right") {
-        if (tab.path !== BetterTypora.getCurrentFile()) BetterTypora.openFile(tab.path);
+        if (tab.path !== BetterTypora.getCurrentFile()) openInCurrentWindow(tab.path);
     } else {
         syncPanes();
     }
@@ -1037,7 +1053,7 @@ function sendToLeft(idx) {
         // 焦点已在左栏 (右栏是预览): setActiveSide 不会迁移 —
         // 左栏编辑器打开发送的文件 (对称 sendToRight 的右栏分支),
         // 右栏预览刷新为邻近标签
-        if (fp && fp !== BetterTypora.getCurrentFile()) BetterTypora.openFile(fp);
+        if (fp && fp !== BetterTypora.getCurrentFile()) openInCurrentWindow(fp);
         syncPanes();
         // 左栏标签栏高亮同步 (发送文件已回标签栏; addOrActivate 已
         // 立即 render, 此处显式同步保证与左栏预览一致)
@@ -1254,7 +1270,7 @@ function setActiveSide(side) {
     var cur = BetterTypora.getCurrentFile();
     if (target && target !== cur) {
         _pendingSide = side;
-        BetterTypora.openFile(target);
+        openInCurrentWindow(target);
         return;
     }
     _pendingSide = null;
@@ -1485,8 +1501,20 @@ function onClickContainer(e) {
 function openLinkTarget(target) {
     if (!target) return;
     _leftPreviewPath = target;
-    setActiveSide("left");
-    BetterTypora.openFile(target);
+    // 预览链接也走 tabs 的复用/创建逻辑。右栏聚焦时先挂起左栏迁移，
+    // 等当前窗口的 opened 事件确认后再贴回左栏，避免重复加载。
+    if (hasTabsCmd("open-file")) {
+        if (_activeSide === "right") _pendingSide = "left";
+        var opened = tabsCmd("open-file", target);
+        if (opened !== false && opened !== null) return;
+        _pendingSide = null;
+    }
+    if (_activeSide === "right") {
+        _pendingSide = "left";
+        openInCurrentWindow(target);
+    } else {
+        openInCurrentWindow(target);
+    }
 }
 
 /** 锚点链接 (#标题): 在预览容器内按标题文本匹配并平滑滚动

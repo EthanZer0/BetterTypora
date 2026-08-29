@@ -53,7 +53,9 @@ function getRenderer() {
         var t = title ? ' title="' + String(title).replace(/"/g, "&quot;") + '"' : "";
         var safeHref = href.replace(/"/g, "&quot;");
         if (isLocalMarkdown(href)) {
-            return '<a href="#" data-bt-link="' + safeHref.replace(/&quot;/g, "&quot;") + '"' + t + ">" + text + "</a>";
+            var target = resolveLocalLink(href);
+            var linkTarget = (target || href).replace(/"/g, "&quot;");
+            return '<a href="#" data-bt-link="' + linkTarget + '"' + t + ">" + text + "</a>";
         }
         if (/^(https?:|mailto:|ftp:)/i.test(href)) {
             return '<a href="' + safeHref + '" target="_blank" rel="noopener"' + t + ">" + text + "</a>";
@@ -92,6 +94,13 @@ function resolveResource(href) {
 function isLocalMarkdown(href) {
     if (/^(https?:|file:|data:|mailto:|ftp:|\/\/|#)/i.test(href)) return false;
     return /\.md$/i.test(href.split(/[?#]/)[0]) || /\.markdown$/i.test(href.split(/[?#]/)[0]);
+}
+
+function resolveLocalLink(href) {
+    var clean = String(href || "").split(/[?#]/)[0];
+    try { clean = decodeURIComponent(clean); } catch (e) {}
+    if (!_currentDir || !clean) return null;
+    try { return path.resolve(_currentDir, clean); } catch (e2) { return null; }
 }
 
 /**

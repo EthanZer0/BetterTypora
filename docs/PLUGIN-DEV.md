@@ -136,6 +136,7 @@ BetterTypora.saveFileAndWait()   // → Promise, 触发保存并等待写盘完�
 BetterTypora.getCurrentFile()    // → string | null  当前编辑文件的绝对路径
 BetterTypora.getMountFolder()    // → string | null  打开的工作区根目录
 BetterTypora.openFile(path)      // → 切换到指定文件
+BetterTypora.openFileInCurrentWindow(path) // → 在当前窗口复用/切换文件
 BetterTypora.reloadFile(path)    // → 重新从磁盘读取指定文件
 BetterTypora.isDocumentEdited()  // → bool  当前文档是否有未保存更改
 

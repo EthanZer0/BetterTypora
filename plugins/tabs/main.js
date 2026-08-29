@@ -13,6 +13,7 @@ var manifest = BetterTypora.manifest;
 var logger = BetterTypora.logger;
 var fs = reqnode("fs");
 var path = reqnode("path");
+var linkRouter = require("./link-router");
 
 // 定时器组 (enable 时创建，disable 时自动清理)
 var _timers = null;
@@ -20,6 +21,7 @@ var _timers = null;
 var _onFileOpenUnsub = null;
 // opened 事件取消订阅 (切换完成后清除旧标签脏状态)
 var _openedUnsub = null;
+var _linkClickHandler = null;
 
 // ===================================================================
 // 分屏协作 — 排除集 (split-view 发送到右栏的标签)
@@ -47,6 +49,11 @@ var _autoHideMouseBound = false;
 var _autoHidePointer = { x: -1, y: -1, valid: false };
 var _autoHideTargets = [];      // [{bar, hotzone, timer, handlers}]
 var _autoHideBarSelectors = ["#typora-tab-bar", "#bt-split-right-tabs"];
+
+function openFileInCurrentWindow(filePath) {
+    var opener = BetterTypora.openFileInCurrentWindow || BetterTypora.openFile;
+    return opener ? opener(filePath) : false;
+}
 
 function _autoHideAttach(bar) {
     if (!bar || bar.__btAutoHideTarget) return;
@@ -1150,8 +1157,8 @@ var newFileInterceptor = {
             return;
         }
 
-        // 打开文件 — BetterTypora API 会自动处理 tab 管理
-        BetterTypora.openFile(filePath);
+        // 打开文件 — 当前窗口创建并激活标签
+        openFileAsTab(filePath);
 
         window.BetterTypora.toast &&
             window.BetterTypora.toast("📝 新建文件: " + path.basename(filePath), 800);
@@ -1160,6 +1167,85 @@ var newFileInterceptor = {
 
     uninstall: function () {
         this._installed = false;
+    }
+};
+
+/* =================================================================== */
+/* 本地链接导航 — 在 Typora 默认 click 处理前路由到 tabs                    */
+/* =================================================================== */
+
+function findAnchor(target) {
+    var el = target;
+    while (el && el !== document) {
+        if (el.tagName && String(el.tagName).toLowerCase() === "a") return el;
+        el = el.parentNode;
+    }
+    return null;
+}
+
+function isEditorOrPreviewLink(anchor) {
+    if (!anchor) return false;
+    if (anchor.closest) return !!(anchor.closest("#write") || anchor.closest(".bt-split-preview"));
+    var el = anchor;
+    while (el && el !== document) {
+        if (el.id === "write" || (el.className && String(el.className).indexOf("bt-split-preview") >= 0)) {
+            return true;
+        }
+        el = el.parentNode;
+    }
+    return false;
+}
+
+function normalizeRequestedFile(filePath) {
+    var value = linkRouter.stripSuffix(filePath);
+    var fileHref = linkRouter.fileHrefToPath(value);
+    return fileHref || value;
+}
+
+/** 在当前窗口复用/创建标签并加载文件。 */
+function openFileAsTab(filePath) {
+    var target = normalizeRequestedFile(filePath);
+    if (!target || !linkRouter.isMarkdownPath(target) || !fs.existsSync(target)) return false;
+
+    var existing = tabStore.findByPath(target);
+    if (existing) {
+        if (!existing.isActive) switchToTab(existing.id);
+        return true;
+    }
+
+    var tabId = tabStore.addOrActivate(target);
+    openFileInCurrentWindow(target);
+    interceptor._restoreScrollAfterOpen(tabId, 0);
+    return true;
+}
+
+var localLinkInterceptor = {
+    install: function () {
+        if (_linkClickHandler) return;
+        _linkClickHandler = function (event) {
+            if (!event || event.defaultPrevented) return;
+            var anchor = findAnchor(event.target);
+            if (!anchor || !isEditorOrPreviewLink(anchor)) return;
+
+            var href = anchor.getAttribute("href") || "";
+            var explicit = anchor.getAttribute("data-bt-link") || "";
+            var current = BetterTypora.getCurrentFile();
+            var target = linkRouter.resolveLocalMarkdownTarget(href, current, explicit);
+            if (!target || !fs.existsSync(target)) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            openFileAsTab(target);
+        };
+        document.addEventListener("click", _linkClickHandler, true);
+        logger.log("已安装本地 Markdown 链接标签路由");
+    },
+
+    uninstall: function () {
+        if (!_linkClickHandler) return;
+        document.removeEventListener("click", _linkClickHandler, true);
+        _linkClickHandler = null;
     }
 };
 
@@ -1185,8 +1271,8 @@ function switchToTab(tabId) {
     // 更新激活状态
     tabStore.activateTab(tabId);
 
-    // 让 Typora 打开文件 (使用 BetterTypora API，自动处理 null 安全)
-    BetterTypora.openFile(tab.filePath);
+    // 当前窗口加载文件；openFile() 可能触发 Typora 新窗口行为
+    openFileInCurrentWindow(tab.filePath);
 
     // 恢复滚动位置 (内部完成后会调用 tabBarUI.render())
     interceptor._restoreScrollAfterOpen(tabId, 0);
@@ -1557,8 +1643,8 @@ function startDeadTabWatcher() {
             if (tabStore.tabs.length > 0 && !tabStore.getActive()) {
                 var next = tabStore.tabs[0];
                 tabStore.activateTab(next.id);
-                // 打开该文件 (BetterTypora API 自动处理 null 安全)
-                BetterTypora.openFile(next.filePath);
+                // 当前窗口打开，避免死标签清理意外创建新窗口
+                openFileInCurrentWindow(next.filePath);
             } else if (tabStore.tabs.length === 0) {
                 tabStore.activeTabId = null;
             }
@@ -1679,8 +1765,8 @@ function waitForStartupDocument(hasRestoredTabs) {
             var bestTab = findBestTab();
             if (bestTab) {
                 logger.log("恢复打开文件: " + bestTab.fileName + " (" + bestTab.filePath + ")");
-                // 关键: 实际打开文件 — 触发 openFile 拦截器, 通知所有订阅者
-                BetterTypora.openFile(bestTab.filePath);
+                // 关键: 当前窗口打开 — 触发文件事件, 通知所有订阅者
+                openFileInCurrentWindow(bestTab.filePath);
             }
         }, 5000);
     }
@@ -1795,7 +1881,10 @@ module.exports = {
         // 3b. 安装新建文件拦截器 (Ctrl+N, 侧边栏新建按钮)
         newFileInterceptor.install();
 
-        // 3c. 切换完成后清除旧标签的脏状态
+        // 3c. 在 Typora 默认链接行为前接管本地 Markdown 链接
+        localLinkInterceptor.install();
+
+        // 3d. 切换完成后清除旧标签的脏状态
         //     opened 事件触发时 previousPath 指向的文档已完成 保存/放弃
         //     (Typora 的 tryLeaveDocument 在切换前处理), 旧标签应显示干净
         _openedUnsub = BetterTypora.onFileEvent("opened", function (data) {
@@ -1816,6 +1905,10 @@ module.exports = {
         }, 300);
 
         // 5. 注册命令
+        api.registerCommand("open-file", function (filePath) {
+            return openFileAsTab(filePath);
+        }, "在当前窗口打开文件标签");
+
         api.registerCommand("next-tab", function () {
             var nextId = tabStore.nextTab();
             if (nextId) switchToTab(nextId);
@@ -1943,6 +2036,7 @@ module.exports = {
         // 停止拦截器
         interceptor.uninstall();
         newFileInterceptor.uninstall();
+        localLinkInterceptor.uninstall();
 
         // 停止守护循环
         tabBarUI.stopGuard();

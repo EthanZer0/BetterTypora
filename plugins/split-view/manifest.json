@@ -1,7 +1,7 @@
 {
   "id": "split-view",
   "name": "Split View",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "左右分屏: 两栏独立标签栈, 任一栏可接管原生编辑器, 另一栏 marked 实时预览",
   "author": "BetterTypora",
   "main": "main.js",

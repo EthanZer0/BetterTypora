@@ -135,6 +135,7 @@ BetterTypora.saveFile()          // → trigger save of the current document (sa
 BetterTypora.getCurrentFile()    // → string | null  absolute path of the current file
 BetterTypora.getMountFolder()    // → string | null  opened workspace root
 BetterTypora.openFile(path)      // → switch to the given file
+BetterTypora.openFileInCurrentWindow(path) // → switch in the current window
 BetterTypora.reloadFile(path)    // → reload the given file from disk
 BetterTypora.isDocumentEdited()  // → bool  whether the current document has unsaved changes
 
