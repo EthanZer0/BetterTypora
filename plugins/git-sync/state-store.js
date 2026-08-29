@@ -7,9 +7,18 @@
             phase: "idle",
             root: null,
             isRepo: false,
+            mode: "",
+            scopePath: "",
+            scopeLabel: "",
+            suggestedScope: "",
+            needsSetup: false,
+            setupView: "",
             branch: "",
             upstream: "",
             remoteUrl: "",
+            remoteName: "",
+            sshPublicKey: "",
+            sshKeyStatus: "",
             files: [],
             ahead: 0,
             behind: 0,
@@ -60,7 +69,7 @@
     };
 
     StateStore.prototype.clear = function () {
-        this.update({ phase: "idle", root: null, isRepo: false, branch: "", upstream: "", remoteUrl: "", files: [], ahead: 0, behind: 0, currentFile: null, commits: [], historyDetail: null, diff: "", message: "", error: "", conflict: false });
+        this.update({ phase: "idle", root: null, isRepo: false, mode: "", scopePath: "", scopeLabel: "", suggestedScope: "", needsSetup: false, setupView: "", branch: "", upstream: "", remoteUrl: "", remoteName: "", sshPublicKey: "", sshKeyStatus: "", files: [], ahead: 0, behind: 0, currentFile: null, commits: [], historyDetail: null, diff: "", message: "", error: "", conflict: false });
     };
 
     if (typeof module !== "undefined") module.exports = StateStore;

@@ -39,6 +39,7 @@
         else if (phase === "checking" || phase === "saving" || phase === "committing" || phase === "fetching" || phase === "resolving" || phase === "pushing") detail = state.message || "处理中…";
         else if (state.files && state.files.length) detail = state.files.length + " 个文件有改动";
         else if (state.ahead || state.behind) detail = (state.ahead ? "↑" + state.ahead + " " : "") + (state.behind ? "↓" + state.behind : "");
+        else if (state.mode === "local") detail = "本地快照";
         else detail = "已同步";
         this.el.className = "bt-git-status bt-git-status-" + phase;
         this.el.innerHTML = icons.icon("git", 15) + '<span class="bt-git-status-branch">' + this.escapeHtml(label) + '</span><span class="bt-git-status-detail">' + this.escapeHtml(detail) + "</span>";

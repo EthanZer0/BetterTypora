@@ -272,6 +272,28 @@
 .bt-git-history-file:hover .bt-git-history-file-open { background: var(--control-hover-bg-color, rgba(128,128,128,.13)); color: var(--text-color, rgba(64,64,64,.95)); }
 .bt-git-commit:focus-visible, .bt-git-history-back:focus-visible, .bt-git-history-file:focus-visible { outline: 1px solid var(--active-file-text-color, var(--text-color, rgba(64,64,64,.8))); outline-offset: 1px; }
 
+/* 初始化流程保持在抽屉内完成：两种模式的边界和副作用在操作前就可见。 */
+.bt-git-setup { padding: 28px 8px 16px; }
+.bt-git-setup-title { margin: 0 4px 7px; color: var(--text-color, rgba(64,64,64,.94)); font-size: 17px; font-weight: 650; letter-spacing: .01em; }
+.bt-git-setup > p { margin: 0 4px 19px; color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.64))); font-size: 12px; line-height: 1.65; }
+.bt-git-setup label { display: grid; gap: 6px; margin: 13px 4px 0; color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.7))); font-size: 11px; font-weight: 550; }
+.bt-git-setup input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--window-border, rgba(128,128,128,.3)) 84%, transparent); border-radius: 7px; outline: none; background: color-mix(in srgb, var(--bg-color, rgba(255,255,255,1)) 76%, transparent); color: var(--text-color, rgba(64,64,64,.92)); font: 400 12px var(--font-sans, "Segoe UI Variable", "Microsoft YaHei", sans-serif); transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease; }
+.bt-git-setup input:focus { border-color: color-mix(in srgb, var(--active-file-text-color, var(--text-color, rgba(64,64,64,1))) 48%, transparent); background: var(--bg-color, rgba(255,255,255,.92)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--active-file-text-color, var(--text-color, rgba(64,64,64,1))) 10%, transparent); }
+.bt-git-setup-note { margin: 13px 4px 0; padding: 9px 10px; border-left: 2px solid color-mix(in srgb, var(--active-file-text-color, var(--text-color, rgba(64,64,64,1))) 42%, transparent); border-radius: 0 7px 7px 0; background: color-mix(in srgb, var(--control-hover-bg-color, rgba(128,128,128,.1)) 70%, transparent); color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.66))); font-size: 11px; line-height: 1.55; }
+.bt-git-setup-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 21px 4px 0; }
+.bt-git-setup-actions .bt-git-primary, .bt-git-setup-actions .bt-git-secondary { min-height: 32px; }
+.bt-git-mode-card { display: grid; width: 100%; gap: 5px; margin-top: 9px; padding: 14px 14px 13px; border: 1px solid color-mix(in srgb, var(--window-border, rgba(128,128,128,.26)) 75%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--control-hover-bg-color, rgba(128,128,128,.06)) 70%, transparent); color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.68))); cursor: pointer; font: 400 11.5px/1.55 var(--font-sans, "Segoe UI Variable", "Microsoft YaHei", sans-serif); text-align: left; transition: background-color .18s ease, border-color .18s ease, box-shadow .2s ease, transform .2s cubic-bezier(.22,1,.36,1); }
+.bt-git-mode-card:hover { border-color: color-mix(in srgb, var(--active-file-text-color, var(--text-color, rgba(64,64,64,1))) 28%, transparent); background: color-mix(in srgb, var(--control-hover-bg-color, rgba(128,128,128,.12)) 82%, transparent); box-shadow: 0 7px 18px color-mix(in srgb, var(--text-color, rgba(64,64,64,1)) 7%, transparent); transform: translateX(-2px); }
+.bt-git-mode-card:active { transform: translateX(-1px) scale(.995); }
+.bt-git-mode-card-title { color: var(--text-color, rgba(64,64,64,.92)); font-size: 13px; font-weight: 620; }
+.bt-git-ssh-box { margin: 18px 4px 0; padding: 12px; border: 1px solid color-mix(in srgb, var(--window-border, rgba(128,128,128,.24)) 78%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--control-hover-bg-color, rgba(128,128,128,.07)) 68%, transparent); }
+.bt-git-ssh-title { color: var(--text-color, rgba(64,64,64,.9)); font-size: 12px; font-weight: 620; }
+.bt-git-ssh-desc { margin: 5px 0 9px; color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.64))); font-size: 10.5px; line-height: 1.55; }
+.bt-git-ssh-public { display: block; width: 100%; min-height: 62px; margin-top: 10px; box-sizing: border-box; resize: vertical; padding: 7px; border: 1px solid color-mix(in srgb, var(--window-border, rgba(128,128,128,.24)) 76%, transparent); border-radius: 6px; outline: 0; background: color-mix(in srgb, var(--bg-color, rgba(255,255,255,1)) 74%, transparent); color: var(--text-color, rgba(64,64,64,.82)); font: 10px/1.4 var(--font-mono, Consolas, monospace); }
+.bt-git-copy-key { margin-top: 5px; padding: 4px 0; font-size: 11px; }
+.bt-git-scope-line { display: flex; justify-content: space-between; gap: 10px; margin: 12px 6px -2px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--window-border, rgba(128,128,128,.18)) 76%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--control-hover-bg-color, rgba(128,128,128,.06)) 70%, transparent); color: var(--secondary-text-color, var(--text-color, rgba(64,64,64,.62))); font-size: 10.5px; }
+.bt-git-scope-line span:last-child { overflow: hidden; color: var(--text-color, rgba(64,64,64,.84)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 560px) {
     .bt-git-panel { right: 0; bottom: 0; width: 100vw; }
     .bt-git-panel-context > span { max-width: 128px; }

@@ -112,7 +112,17 @@
             return;
         }
         if (action === "close") this.close();
-        else if (action === "init") this.engine.initRepo();
+        else if (action === "init") this.engine.showSetup("choose");
+        else if (action === "setup-back") this.engine.showSetup("back");
+        else if (action === "setup-local") this.engine.showSetup("local");
+        else if (action === "setup-unified") this.engine.showSetup("unified");
+        else if (action === "setup-scope") this.engine.showSetup("scope");
+        else if (action === "remote-setup") this.engine.showSetup("remote");
+        else if (action === "initialize-local") this.engine.initLocal(this._inputValue("local-root"));
+        else if (action === "initialize-unified") this.engine.initUnified(this._inputValue("unified-root"), this._inputValue("unified-scope"), this._inputValue("unified-remote"));
+        else if (action === "save-remote") this.engine.configureRemote(this._inputValue("unified-remote"));
+        else if (action === "ssh-key-helper") this.engine.prepareSshKey();
+        else if (action === "copy-ssh-key") this.engine.copySshPublicKey();
         else if (action === "refresh") this.engine.refresh();
         else if (action === "snapshot") this.engine.saveSnapshot().then(function () { self.engine.loadHistory(); });
         else if (action === "sync") this.engine.sync().then(function () { self.engine.loadHistory(); });
@@ -121,6 +131,12 @@
             if (result && result.success) self.close();
         });
         else if (action === "history") this.engine.loadHistory();
+    };
+
+    Panel.prototype._inputValue = function (name) {
+        if (!this.el) return "";
+        var input = this.el.querySelector('[data-input="' + name + '"]');
+        return input ? input.value : "";
     };
 
     function getFileChange(code) {
@@ -151,6 +167,40 @@
         var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
         if (date.toDateString() === yesterday.toDateString()) return "昨天 " + clock;
         return (date.getMonth() + 1) + "月" + date.getDate() + "日 " + clock;
+    }
+
+    function renderSetup(state, escapeHtml) {
+        var view = state.setupView || "choose";
+        var root = escapeHtml(state.root || "");
+        var scope = escapeHtml(state.scopePath || state.suggestedScope || "inbox");
+        var html = '<section class="bt-git-setup">';
+        if (view === "local") {
+            html += '<div class="bt-git-setup-title">本地文件夹</div><p>在当前文件夹建立本地 Git 快照。它不会配置远程，也不会上传笔记。</p>';
+            html += '<label>本地仓库目录<input data-input="local-root" value="' + root + '" placeholder="包含当前 Markdown 文件的文件夹"></label>';
+            html += '<div class="bt-git-setup-actions"><button class="bt-git-secondary" data-action="setup-back">返回</button><button class="bt-git-primary" data-action="initialize-local">启用本地快照</button></div>';
+        } else if (view === "unified" || view === "scope") {
+            var scopeOnly = view === "scope";
+            html += '<div class="bt-git-setup-title">' + (scopeOnly ? "加入统一笔记仓库" : "统一笔记仓库") + '</div>';
+            html += '<p>' + (scopeOnly ? "为当前文件指定一个受管理的工作区。快照与历史只会处理这个目录。" : "将多个笔记工作区存进同一仓库，并按工作区分别保存快照与同步。") + '</p>';
+            html += '<label>统一仓库目录<input data-input="unified-root" value="' + root + '" placeholder="例如 D:\\TyporaNotes"></label>';
+            html += '<label>当前工作区目录<input data-input="unified-scope" value="' + scope + '" placeholder="例如 projects / daily"></label>';
+            if (!scopeOnly) html += '<label>GitHub 仓库地址（可稍后填写）<input data-input="unified-remote" value="" placeholder="https://github.com/you/notes.git 或 git@github.com:you/notes.git"></label>';
+            if (!scopeOnly) html += '<div class="bt-git-setup-note">若当前文件不在统一仓库内，会复制一份到该工作区；原文件不会被移动或删除。</div>';
+            html += '<div class="bt-git-setup-actions"><button class="bt-git-secondary" data-action="setup-back">返回</button><button class="bt-git-primary" data-action="initialize-unified">' + (scopeOnly ? "加入工作区" : "创建统一仓库") + '</button></div>';
+        } else if (view === "remote") {
+            html += '<div class="bt-git-setup-title">连接 GitHub 仓库</div><p>远程同步只在统一笔记仓库中可用。凭证仍由 SSH 或系统 Git 凭证管理器处理。</p>';
+            html += '<label>远程仓库地址<input data-input="unified-remote" value="' + escapeHtml(state.remoteUrl || "") + '" placeholder="https://github.com/you/notes.git 或 git@github.com:you/notes.git"></label>';
+            html += '<div class="bt-git-setup-note">首次使用请连接一个空仓库；已有远程内容需要先导入或克隆，避免产生无关历史。</div>';
+            html += '<div class="bt-git-ssh-box"><div class="bt-git-ssh-title">SSH 密钥</div><div class="bt-git-ssh-desc">插件会先检测本机默认密钥；没有时，点击后生成一对新的免密码密钥。私钥只保存在本机，公钥需要添加到 GitHub。</div><button class="bt-git-secondary" data-action="ssh-key-helper">' + (state.sshKeyStatus === "checking" ? "正在检查…" : (state.sshPublicKey ? "重新检测密钥" : "检测或生成密钥")) + '</button>';
+            if (state.sshPublicKey) html += '<textarea class="bt-git-ssh-public" readonly aria-label="SSH 公钥">' + escapeHtml(state.sshPublicKey) + '</textarea><button class="bt-git-link bt-git-copy-key" data-action="copy-ssh-key">复制公钥</button>';
+            html += '</div>';
+            html += '<div class="bt-git-setup-actions"><button class="bt-git-secondary" data-action="setup-back">返回</button><button class="bt-git-primary" data-action="save-remote">连接远程</button></div>';
+        } else {
+            html += '<div class="bt-git-setup-title">为笔记启用版本管理</div><p>根据你的写作方式选择即可，之后不会混用两种规则。</p>';
+            html += '<button class="bt-git-mode-card" data-action="setup-local"><span class="bt-git-mode-card-title">本地文件夹</span><span>给当前文件夹建立本地快照。适合零散 Markdown，不提供远程同步。</span></button>';
+            html += '<button class="bt-git-mode-card" data-action="setup-unified"><span class="bt-git-mode-card-title">统一笔记仓库</span><span>把不同工作区归入一个笔记仓库，按工作区隔离快照，并可同步到 GitHub。</span></button>';
+        }
+        return html + '</section>';
     }
 
     Panel.prototype.renderLegacy = function (state) {
@@ -199,14 +249,30 @@
         var files = state.files || [];
         var max = 80;
         try { max = parseInt(this.api.getSetting("maxStatusFiles", 80), 10) || 80; } catch (e) {}
-        var branch = state.branch || "未初始化";
+        var setup = !state.isRepo || state.needsSetup || !!state.setupView;
+        var branch = setup ? "Git 同步" : (state.mode === "unified" ? (state.scopeLabel || "统一笔记") : (state.branch || "本地快照"));
         // 不能使用原生 header：Typora 将所有 header 全局设为 fixed，会使抽屉工具栏被父容器上沿裁切。
         var html = '<div class="bt-git-panel-toolbar" role="toolbar"><div class="bt-git-panel-context">' + icons.icon("git", 16) + '<span title="' + this.escapeHtml(state.root || "") + '">' + this.escapeHtml(branch) + "</span></div><div class=\"bt-git-panel-actions\">";
-        if (!state.isRepo) html += '<button class="bt-git-action-button" data-action="init" title="初始化笔记仓库">' + icons.icon("folder", 15) + "</button>";
-        else html += '<button class="bt-git-action-button" data-action="snapshot" title="保存快照"' + (busy ? " disabled" : "") + ">" + icons.icon("upload", 15) + '</button><button class="bt-git-action-button" data-action="sync" title="同步"' + (busy ? " disabled" : "") + ">" + icons.icon("sync", 15) + '</button><button class="bt-git-action-button" data-action="diff" title="比较当前文件差异"' + (busy ? " disabled" : "") + ">" + icons.icon("compare", 15) + "</button>";
+        if (setup) html += '<button class="bt-git-action-button" data-action="init" title="选择笔记管理方式">' + icons.icon("folder", 15) + "</button>";
+        else {
+            html += '<button class="bt-git-action-button" data-action="snapshot" title="保存快照"' + (busy ? " disabled" : "") + ">" + icons.icon("upload", 15) + "</button>";
+            if (state.mode === "unified") {
+                html += state.remoteUrl ? '<button class="bt-git-action-button" data-action="sync" title="同步笔记"' + (busy ? " disabled" : "") + ">" + icons.icon("sync", 15) + "</button>" : '<button class="bt-git-action-button" data-action="remote-setup" title="连接 GitHub 仓库">' + icons.icon("upload", 15) + "</button>";
+                html += '<button class="bt-git-action-button" data-action="remote-setup" title="远程设置">' + icons.icon("settings", 15) + "</button>";
+            }
+            html += '<button class="bt-git-action-button" data-action="diff" title="比较当前文件差异"' + (busy ? " disabled" : "") + ">" + icons.icon("compare", 15) + "</button>";
+        }
         html += '<button class="bt-git-action-button" data-action="refresh" title="刷新"' + (busy ? " disabled" : "") + ">" + icons.icon("refresh", 15) + '</button><button class="bt-git-action-button" data-action="close" title="关闭">' + icons.icon("close", 15) + "</button></div></div>";
         html += '<main class="bt-git-panel-body">';
         if (state.error) html += '<div class="bt-git-inline-error">' + icons.icon("warning", 14) + '<span>' + this.escapeHtml(state.error) + "</span></div>";
+        if (setup) {
+            html += renderSetup(state, this.escapeHtml);
+            html += "</main>";
+            this.el.innerHTML = html;
+            return;
+        }
+        if (state.mode === "unified") html += '<div class="bt-git-scope-line" title="' + this.escapeHtml(state.root || "") + '"><span>统一笔记仓库</span><span>' + this.escapeHtml(state.scopeLabel || "当前工作区") + "</span></div>";
+        else html += '<div class="bt-git-scope-line"><span>本地文件夹模式</span><span>仅本地快照</span></div>';
         html += '<section class="bt-git-section"><div class="bt-git-section-title"><span>工作区改动</span><span class="bt-git-section-count">' + (state.isRepo ? files.length : "—") + "</span></div>";
         if (!state.isRepo) html += '<div class="bt-git-simple-empty">当前工作区尚未初始化 Git</div>';
         else if (!files.length) html += '<div class="bt-git-simple-empty">没有未提交改动</div>';

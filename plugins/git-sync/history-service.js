@@ -7,9 +7,9 @@
         this.store = store;
     }
 
-    HistoryService.prototype.load = function (root, limit) {
+    HistoryService.prototype.load = function (root, limit, pathspecs) {
         var self = this;
-        return this.adapter.log(root, limit || 20).then(function (result) {
+        return this.adapter.log(root, limit || 20, pathspecs).then(function (result) {
             if (result.success) self.store.update({ commits: result.commits || [], historyDetail: null });
             return result;
         });
@@ -88,8 +88,8 @@
     };
 
     /* 读取快照详情时只返回该提交的直接变更，不扫描整个仓库。 */
-    HistoryService.prototype.loadCommitFiles = function (root, revision) {
-        return this.adapter.commitFiles(root, revision);
+    HistoryService.prototype.loadCommitFiles = function (root, revision, pathspecs) {
+        return this.adapter.commitFiles(root, revision, pathspecs);
     };
 
     /* 恢复使用的目标快照文件内容；文件在目标快照中不存在时标记为 missing。 */

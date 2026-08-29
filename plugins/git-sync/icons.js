@@ -13,6 +13,7 @@
             upload: '<path d="M8 13.8V3.1M4.7 6.4 8 3.1l3.3 3.3"/><path d="M3 14.5h10"/>',
             download: '<path d="M8 2.3v10.6m-3.3-3.3L8 12.9l3.3-3.3"/><path d="M3 14.5h10"/>',
             close: '<path d="m4 4 8 8m0-8-8 8"/>',
+            settings: '<path d="M8 2.6v1.3m0 8.2v1.3M2.6 8h1.3m8.2 0h1.3M4.2 4.2l.9.9m5.8 5.8.9.9m0-7.6-.9.9m-5.8 5.8-.9.9"/><circle cx="8" cy="8" r="2.4"/><circle cx="8" cy="8" r="5.1"/>',
             folder: '<path d="M2.5 4.5h4l1.2 1.3h5.8v6.7h-11z"/>',
             file: '<path d="M4 2.5h5l2.5 2.5v8.5H4zM9 2.5V5h2.5"/>',
             warning: '<path d="m8 2.4 5.4 10H2.6z"/><path d="M8 6.1v3.1m0 2.1v.1"/>'

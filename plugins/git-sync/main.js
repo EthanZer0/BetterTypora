@@ -3,6 +3,7 @@ var BT = require("bettertypora:api");
 var api = BT.api;
 var logger = BT.logger;
 var GitAdapter = require("./git-adapter");
+var RepositoryProfileService = require("./repository-profile-service");
 var WorkspaceService = require("./workspace-service");
 var StateStore = require("./state-store");
 var HistoryService = require("./history-service");
@@ -11,6 +12,7 @@ var Statusbar = require("./statusbar");
 var Panel = require("./panel");
 
 var adapter = null;
+var profiles = null;
 var workspace = null;
 var store = null;
 var history = null;
@@ -39,7 +41,8 @@ module.exports = {
     onLoad: function () {
         store = new StateStore();
         adapter = new GitAdapter(logger);
-        workspace = new WorkspaceService(BT, adapter, setting, logger);
+        profiles = new RepositoryProfileService(api, logger);
+        workspace = new WorkspaceService(BT, adapter, setting, profiles, logger);
         history = new HistoryService(adapter, store);
         engine = new SyncEngine(BT, adapter, workspace, store, history, setting, logger);
         timers = BT.createTimerGroup();
@@ -61,8 +64,9 @@ module.exports = {
         api.registerCommand("restore-snapshot-file", function (revision, filePath) { return engine.restoreSnapshotFile(revision, filePath); }, "将单个文件恢复到指定 Git 快照");
 
         addUnsubscriber(BT.onFileEvent("opened", function () {
-            engine.refresh();
-            if (setting("autoFetchOnOpen", false)) timers.setTimeout(function () { engine.fetch(); }, 250);
+            engine.refresh().then(function (result) {
+                if (setting("autoFetchOnOpen", false) && result && result.mode === "unified") timers.setTimeout(function () { engine.fetch(); }, 250);
+            });
         }));
         addUnsubscriber(BT.onFileEvent("saved", function () { engine.refresh(); }));
         addUnsubscriber(BT.onFileEvent("renamed", function () { engine.refresh(); }));
@@ -86,6 +90,7 @@ module.exports = {
         engine = null;
         history = null;
         workspace = null;
+        profiles = null;
         adapter = null;
         store = null;
         statusbar = null;
